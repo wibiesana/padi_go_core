@@ -1,0 +1,123 @@
+package middleware_test
+
+import (
+	"net/http"
+	"net/http/httptest"
+	"testing"
+
+	"github.com/wibiesana/padi-core/auth"
+	"github.com/wibiesana/padi-core/config"
+	"github.com/wibiesana/padi-core/middleware"
+)
+
+func TestMiddlewareStack(t *testing.T) {
+	// 1. Test Logger
+	t.Run("Logger", func(t *testing.T) {
+		handler := middleware.Logger(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusOK)
+		}))
+		req := httptest.NewRequest(http.MethodGet, "/test", nil)
+		w := httptest.NewRecorder()
+		handler.ServeHTTP(w, req)
+		if w.Code != http.StatusOK {
+			t.Fatalf("expected 200, got %d", w.Code)
+		}
+	})
+
+	// 2. Test Recoverer
+	t.Run("Recoverer", func(t *testing.T) {
+		handler := middleware.Recoverer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			panic("something went wrong")
+		}))
+		req := httptest.NewRequest(http.MethodGet, "/panic", nil)
+		w := httptest.NewRecorder()
+		handler.ServeHTTP(w, req)
+		if w.Code != http.StatusInternalServerError {
+			t.Fatalf("expected 500 on panic recovery, got %d", w.Code)
+		}
+	})
+
+	// 3. Test CORS
+	t.Run("CORS", func(t *testing.T) {
+		cfg := &config.Config{CorsOrigins: []string{"http://localhost:3000"}}
+		corsMiddleware := middleware.CORS(cfg)
+		handler := corsMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusOK)
+		}))
+		req := httptest.NewRequest(http.MethodOptions, "/test", nil)
+		req.Header.Set("Origin", "http://localhost:3000")
+		req.Header.Set("Access-Control-Request-Method", "GET")
+		w := httptest.NewRecorder()
+		handler.ServeHTTP(w, req)
+		if w.Header().Get("Access-Control-Allow-Origin") != "http://localhost:3000" {
+			t.Fatalf("expected CORS origin header")
+		}
+	})
+
+	// 4. Test AuthRequired
+	t.Run("AuthRequired", func(t *testing.T) {
+		config.AppConfig = &config.Config{
+			JWTSecret:     "test-secret-key-32-chars-long-abc",
+			JWTExpiration: 1,
+		}
+
+		handler := middleware.AuthRequired(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			claims, ok := r.Context().Value(middleware.UserContextKey).(*auth.JWTClaims)
+			if !ok || claims.UserID != 42 {
+				http.Error(w, "invalid context", http.StatusUnauthorized)
+				return
+			}
+			w.WriteHeader(http.StatusOK)
+		}))
+
+		// Missing header
+		reqNoAuth := httptest.NewRequest(http.MethodGet, "/protected", nil)
+		w1 := httptest.NewRecorder()
+		handler.ServeHTTP(w1, reqNoAuth)
+		if w1.Code != http.StatusUnauthorized {
+			t.Fatalf("expected 401 on missing auth, got %d", w1.Code)
+		}
+
+		// Valid token
+		token, _ := auth.GenerateToken(42, "test@example.com", "admin")
+		reqAuth := httptest.NewRequest(http.MethodGet, "/protected", nil)
+		reqAuth.Header.Set("Authorization", "Bearer "+token)
+		w2 := httptest.NewRecorder()
+		handler.ServeHTTP(w2, reqAuth)
+		if w2.Code != http.StatusOK {
+			t.Fatalf("expected 200 with valid token, got %d", w2.Code)
+		}
+	})
+
+	// 5. Test RateLimit
+	t.Run("RateLimit", func(t *testing.T) {
+		limiter := middleware.RateLimit(2, 60)
+		handler := limiter(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusOK)
+		}))
+
+		req := httptest.NewRequest(http.MethodGet, "/rate-limited", nil)
+		req.RemoteAddr = "192.0.2.1:1234"
+
+		// 1st request - ok
+		w1 := httptest.NewRecorder()
+		handler.ServeHTTP(w1, req)
+		if w1.Code != http.StatusOK {
+			t.Fatalf("expected 200 on 1st request, got %d", w1.Code)
+		}
+
+		// 2nd request - ok
+		w2 := httptest.NewRecorder()
+		handler.ServeHTTP(w2, req)
+		if w2.Code != http.StatusOK {
+			t.Fatalf("expected 200 on 2nd request, got %d", w2.Code)
+		}
+
+		// 3rd request - blocked (429)
+		w3 := httptest.NewRecorder()
+		handler.ServeHTTP(w3, req)
+		if w3.Code != http.StatusTooManyRequests {
+			t.Fatalf("expected 429 on 3rd request, got %d", w3.Code)
+		}
+	})
+}

@@ -1,7 +1,6 @@
 package query_test
 
 import (
-	"os"
 	"testing"
 	"time"
 
@@ -20,12 +19,9 @@ type Product struct {
 }
 
 func setupQueryDB(t *testing.T) {
-	dbFile := "test_query.sqlite"
-	_ = os.Remove(dbFile)
-
 	cfg := &config.Config{
 		DBConnection: "sqlite",
-		DBDatabase:   dbFile,
+		DBDatabase:   "file:query_memdb?mode=memory&cache=shared",
 	}
 	config.AppConfig = cfg
 
@@ -52,7 +48,6 @@ func setupQueryDB(t *testing.T) {
 
 func TestQueryBuilder(t *testing.T) {
 	setupQueryDB(t)
-	defer os.Remove("test_query.sqlite")
 
 	// 1. Insert
 	q := query.New("products")

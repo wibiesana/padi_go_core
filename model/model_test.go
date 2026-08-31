@@ -1,7 +1,6 @@
 package model_test
 
 import (
-	"os"
 	"testing"
 	"time"
 
@@ -25,12 +24,9 @@ func (TestArticle) TableName() string {
 }
 
 func setupTestDB(t *testing.T) {
-	dbFile := "test_model.sqlite"
-	_ = os.Remove(dbFile)
-
 	cfg := &config.Config{
 		DBConnection: "sqlite",
-		DBDatabase:   dbFile,
+		DBDatabase:   "file:model_memdb?mode=memory&cache=shared",
 	}
 	config.AppConfig = cfg
 
@@ -57,7 +53,6 @@ func setupTestDB(t *testing.T) {
 
 func TestActiveRecordCRUD(t *testing.T) {
 	setupTestDB(t)
-	defer os.Remove("test_model.sqlite")
 
 	// 1. Create / Save
 	art := TestArticle{
@@ -142,7 +137,6 @@ func TestActiveRecordCRUD(t *testing.T) {
 
 func TestAllActiveRecordMethods(t *testing.T) {
 	setupTestDB(t)
-	defer os.Remove("test_model.sqlite")
 
 	// 1. Metadata and connection tests
 	tbl := model.GetTable[TestArticle]()

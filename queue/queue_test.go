@@ -1,0 +1,66 @@
+package queue_test
+
+import (
+	"encoding/json"
+	"sync"
+	"testing"
+	"time"
+
+	"github.com/wibiesana/padi-core/config"
+	"github.com/wibiesana/padi-core/database"
+	"github.com/wibiesana/padi-core/queue"
+)
+
+func TestQueuePushAndWork(t *testing.T) {
+	cfg := &config.Config{
+		DBConnection: "sqlite",
+		DBDatabase:   "file:queue_memdb?mode=memory&cache=shared",
+	}
+	config.AppConfig = cfg
+
+	_, err := database.Connect(cfg)
+	if err != nil {
+		t.Fatalf("failed to connect database: %v", err)
+	}
+
+	var wg sync.WaitGroup
+	wg.Add(1)
+	processedName := ""
+
+	queue.RegisterJobHandler("SendWelcomeEmail", func(payload []byte) error {
+		var data struct {
+			Email string `json:"email"`
+		}
+		if err := json.Unmarshal(payload, &data); err != nil {
+			return err
+		}
+		processedName = data.Email
+		wg.Done()
+		return nil
+	})
+
+	// Push Job
+	err = queue.Push("SendWelcomeEmail", map[string]string{"email": "john@example.com"}, "emails")
+	if err != nil {
+		t.Fatalf("Push failed: %v", err)
+	}
+
+	// Run Worker for 1 job in background
+	go queue.Work("emails", 1)
+
+	// Wait with timeout
+	done := make(chan struct{})
+	go func() {
+		wg.Wait()
+		close(done)
+	}()
+
+	select {
+	case <-done:
+		if processedName != "john@example.com" {
+			t.Fatalf("expected email 'john@example.com', got '%s'", processedName)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatalf("queue worker timed out processing job")
+	}
+}

@@ -1,7 +1,6 @@
 package activerecord_test
 
 import (
-	"os"
 	"testing"
 	"time"
 
@@ -25,12 +24,9 @@ func (TestArticle) TableName() string {
 }
 
 func setupTestDB(t *testing.T) {
-	dbFile := "test_ar.sqlite"
-	_ = os.Remove(dbFile)
-
 	cfg := &config.Config{
 		DBConnection: "sqlite",
-		DBDatabase:   dbFile,
+		DBDatabase:   "file:ar_memdb?mode=memory&cache=shared",
 	}
 	config.AppConfig = cfg
 
@@ -57,7 +53,6 @@ func setupTestDB(t *testing.T) {
 
 func TestActiveRecord(t *testing.T) {
 	setupTestDB(t)
-	defer os.Remove("test_ar.sqlite")
 
 	// 1. Save
 	art := TestArticle{

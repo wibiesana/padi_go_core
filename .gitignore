@@ -9,6 +9,8 @@ padi
 # Test artifacts
 *.test
 *.out
+*.sqlite
+*.sqlite3
 database/*.sqlite
 !database/.gitkeep
 
