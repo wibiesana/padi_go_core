@@ -209,30 +209,39 @@ func (q *Query) Offset(offset int) *Query {
 // BuildSQL compiles the current query state into SQL string and arguments
 func (q *Query) BuildSQL() (string, []interface{}) {
 	var sqlStr strings.Builder
-	sqlStr.WriteString(fmt.Sprintf("SELECT %s FROM %s", strings.Join(q.selects, ", "), q.table))
+	sqlStr.WriteString("SELECT ")
+	sqlStr.WriteString(strings.Join(q.selects, ", "))
+	sqlStr.WriteString(" FROM ")
+	sqlStr.WriteString(q.table)
 
 	if len(q.joins) > 0 {
-		sqlStr.WriteString(" " + strings.Join(q.joins, " "))
+		sqlStr.WriteString(" ")
+		sqlStr.WriteString(strings.Join(q.joins, " "))
 	}
 
 	if len(q.wheres) > 0 {
-		sqlStr.WriteString(" WHERE " + strings.Join(q.wheres, " AND "))
+		sqlStr.WriteString(" WHERE ")
+		sqlStr.WriteString(strings.Join(q.wheres, " AND "))
 	}
 
 	if len(q.groupBys) > 0 {
-		sqlStr.WriteString(" GROUP BY " + strings.Join(q.groupBys, ", "))
+		sqlStr.WriteString(" GROUP BY ")
+		sqlStr.WriteString(strings.Join(q.groupBys, ", "))
 	}
 
 	if len(q.orderBys) > 0 {
-		sqlStr.WriteString(" ORDER BY " + strings.Join(q.orderBys, ", "))
+		sqlStr.WriteString(" ORDER BY ")
+		sqlStr.WriteString(strings.Join(q.orderBys, ", "))
 	}
 
 	if q.limitVal >= 0 {
-		sqlStr.WriteString(fmt.Sprintf(" LIMIT %d", q.limitVal))
+		sqlStr.WriteString(" LIMIT ")
+		sqlStr.WriteString(strconv.Itoa(q.limitVal))
 	}
 
 	if q.offsetVal > 0 {
-		sqlStr.WriteString(fmt.Sprintf(" OFFSET %d", q.offsetVal))
+		sqlStr.WriteString(" OFFSET ")
+		sqlStr.WriteString(strconv.Itoa(q.offsetVal))
 	}
 
 	return sqlStr.String(), q.args

@@ -35,7 +35,7 @@ func New(baseDir ...string) *Generator {
 	return &Generator{
 		db:              database.GetDB(),
 		baseDir:         dir,
-		protectedTables: []string{"password_resets", "migrations", "jobs"},
+		protectedTables: []string{"users", "password_resets", "migrations", "jobs"},
 	}
 }
 
@@ -373,6 +373,7 @@ func (g *Generator) GenerateCRUD(tableName string) error {
 	fmt.Printf("r.Route(\"/%s\", func(r chi.Router) {\n", strings.ToLower(tableName))
 	fmt.Printf("    ctrl := controllers.New%sController()\n", modelName)
 	fmt.Println("    r.Get(\"/\", ctrl.Index)")
+	fmt.Println("    r.Get(\"/all\", ctrl.All)")
 	fmt.Println("    r.Post(\"/\", ctrl.Store)")
 	fmt.Println("    r.Get(\"/{id}\", ctrl.Show)")
 	fmt.Println("    r.Put(\"/{id}\", ctrl.Update)")
@@ -518,6 +519,18 @@ func (c *{{ModelName}}Controller) Index(w http.ResponseWriter, r *http.Request) 
 	}
 
 	response.Paginated(w, records, meta, "{{ModelName}} list retrieved successfully")
+}
+
+// All retrieves all records without pagination
+func (c *{{ModelName}}Controller) All(w http.ResponseWriter, r *http.Request) {
+	var records []models.{{ModelName}}
+	err := query.New("{{TableName}}").All(&records)
+	if err != nil {
+		response.InternalServerError(w, "Failed to retrieve all {{ModelName}}")
+		return
+	}
+
+	response.Success(w, records, "All {{ModelName}} retrieved successfully")
 }
 
 // Show retrieves a single record by ID
