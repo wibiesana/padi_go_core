@@ -10,6 +10,8 @@ type Response struct {
 	Status  int         `json:"status"`
 	Success bool        `json:"success"`
 	Message string      `json:"message,omitempty"`
+	Item    interface{} `json:"item,omitempty"`
+	Items   interface{} `json:"items,omitempty"`
 	Data    interface{} `json:"data,omitempty"`
 	Meta    *Pagination `json:"meta,omitempty"`
 	Errors  interface{} `json:"errors,omitempty"`
@@ -38,7 +40,10 @@ func JSON(w http.ResponseWriter, statusCode int, data interface{}, message ...st
 		Status:  statusCode,
 		Success: success,
 		Message: msg,
-		Data:    data,
+	}
+
+	if data != nil {
+		res.Data = data
 	}
 
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
@@ -46,26 +51,27 @@ func JSON(w http.ResponseWriter, statusCode int, data interface{}, message ...st
 	_ = json.NewEncoder(w).Encode(res)
 }
 
-// Success renders 200 OK
-func Success(w http.ResponseWriter, data interface{}, message ...string) {
+// Item renders a single record response under 'item'
+func Item(w http.ResponseWriter, item interface{}, message ...string) {
 	msg := "Operation successful"
 	if len(message) > 0 {
 		msg = message[0]
 	}
-	JSON(w, http.StatusOK, data, msg)
-}
 
-// Created renders 201 Created
-func Created(w http.ResponseWriter, data interface{}, message ...string) {
-	msg := "Resource created successfully"
-	if len(message) > 0 {
-		msg = message[0]
+	res := Response{
+		Status:  http.StatusOK,
+		Success: true,
+		Message: msg,
+		Item:    item,
 	}
-	JSON(w, http.StatusCreated, data, msg)
+
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	w.WriteHeader(http.StatusOK)
+	_ = json.NewEncoder(w).Encode(res)
 }
 
-// Paginated renders paginated data with meta
-func Paginated(w http.ResponseWriter, data interface{}, meta Pagination, message ...string) {
+// Items renders a list/collection of records under 'items'
+func Items(w http.ResponseWriter, items interface{}, message ...string) {
 	msg := "Data retrieved successfully"
 	if len(message) > 0 {
 		msg = message[0]
@@ -75,7 +81,50 @@ func Paginated(w http.ResponseWriter, data interface{}, meta Pagination, message
 		Status:  http.StatusOK,
 		Success: true,
 		Message: msg,
-		Data:    data,
+		Items:   items,
+	}
+
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	w.WriteHeader(http.StatusOK)
+	_ = json.NewEncoder(w).Encode(res)
+}
+
+// Success renders 200 OK with single item or items
+func Success(w http.ResponseWriter, data interface{}, message ...string) {
+	Item(w, data, message...)
+}
+
+// Created renders 201 Created with single item
+func Created(w http.ResponseWriter, item interface{}, message ...string) {
+	msg := "Resource created successfully"
+	if len(message) > 0 {
+		msg = message[0]
+	}
+
+	res := Response{
+		Status:  http.StatusCreated,
+		Success: true,
+		Message: msg,
+		Item:    item,
+	}
+
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	w.WriteHeader(http.StatusCreated)
+	_ = json.NewEncoder(w).Encode(res)
+}
+
+// Paginated renders paginated data under 'items' with meta
+func Paginated(w http.ResponseWriter, items interface{}, meta Pagination, message ...string) {
+	msg := "Data retrieved successfully"
+	if len(message) > 0 {
+		msg = message[0]
+	}
+
+	res := Response{
+		Status:  http.StatusOK,
+		Success: true,
+		Message: msg,
+		Items:   items,
 		Meta:    &meta,
 	}
 
