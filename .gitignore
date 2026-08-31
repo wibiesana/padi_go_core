@@ -1,0 +1,28 @@
+# Binaries
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+padi
+
+# Test artifacts
+*.test
+*.out
+database/*.sqlite
+!database/.gitkeep
+
+# Environment variables
+.env
+
+# Storage and uploads
+storage/uploads/*
+!storage/uploads/.gitkeep
+storage/cache/*
+!storage/cache/.gitkeep
+
+# OS / Editor files
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
