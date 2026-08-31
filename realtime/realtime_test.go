@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/wibiesana/padi-core/realtime"
+	"github.com/wibiesana/padi_go_core/realtime"
 )
 
 func TestRealtimeSSEAndPublish(t *testing.T) {

@@ -7,7 +7,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/wibiesana/padi-core/database"
+	"github.com/wibiesana/padi_go_core/database"
 )
 
 type JobRecord struct {

@@ -1,4 +1,4 @@
-module github.com/wibiesana/padi-core
+module github.com/wibiesana/padi_go_core
 
 go 1.25.0
 

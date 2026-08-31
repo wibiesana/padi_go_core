@@ -3,7 +3,7 @@ package email_test
 import (
 	"testing"
 
-	"github.com/wibiesana/padi-core/email"
+	"github.com/wibiesana/padi_go_core/email"
 )
 
 func TestEmailSendValidation(t *testing.T) {

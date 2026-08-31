@@ -5,9 +5,9 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/wibiesana/padi-core/config"
-	"github.com/wibiesana/padi-core/response"
-	"github.com/wibiesana/padi-core/router"
+	"github.com/wibiesana/padi_go_core/config"
+	"github.com/wibiesana/padi_go_core/response"
+	"github.com/wibiesana/padi_go_core/router"
 
 	"github.com/go-chi/chi/v5"
 )

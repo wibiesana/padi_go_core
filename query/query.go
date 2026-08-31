@@ -11,9 +11,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/wibiesana/padi-core/database"
-	"github.com/wibiesana/padi-core/response"
-	"github.com/wibiesana/padi-core/router"
+	"github.com/wibiesana/padi_go_core/database"
+	"github.com/wibiesana/padi_go_core/response"
+	"github.com/wibiesana/padi_go_core/router"
 )
 
 const Version = "2.1.11"

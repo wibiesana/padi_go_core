@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/wibiesana/padi-core/config"
+	"github.com/wibiesana/padi_go_core/config"
 
 	"github.com/golang-jwt/jwt/v5"
 	"golang.org/x/crypto/bcrypt"

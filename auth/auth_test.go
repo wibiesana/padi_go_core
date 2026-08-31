@@ -3,8 +3,8 @@ package auth_test
 import (
 	"testing"
 
-	"github.com/wibiesana/padi-core/auth"
-	"github.com/wibiesana/padi-core/config"
+	"github.com/wibiesana/padi_go_core/auth"
+	"github.com/wibiesana/padi_go_core/config"
 )
 
 func TestPasswordHashing(t *testing.T) {

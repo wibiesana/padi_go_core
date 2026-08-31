@@ -4,7 +4,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/wibiesana/padi-core/cache"
+	"github.com/wibiesana/padi_go_core/cache"
 )
 
 func TestCacheSetGetRemember(t *testing.T) {

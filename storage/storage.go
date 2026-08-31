@@ -13,7 +13,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/wibiesana/padi-core/config"
+	"github.com/wibiesana/padi_go_core/config"
 )
 
 var DangerousExtensions = map[string]bool{

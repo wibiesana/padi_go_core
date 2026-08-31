@@ -3,8 +3,8 @@ package database_test
 import (
 	"testing"
 
-	"github.com/wibiesana/padi-core/config"
-	"github.com/wibiesana/padi-core/database"
+	"github.com/wibiesana/padi_go_core/config"
+	"github.com/wibiesana/padi_go_core/database"
 )
 
 func TestDatabaseConnectAndGetDriver(t *testing.T) {

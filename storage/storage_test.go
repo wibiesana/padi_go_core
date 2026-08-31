@@ -8,7 +8,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/wibiesana/padi-core/storage"
+	"github.com/wibiesana/padi_go_core/storage"
 )
 
 func TestStorageUploadAndDelete(t *testing.T) {

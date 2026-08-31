@@ -10,9 +10,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/wibiesana/padi-core/auth"
-	"github.com/wibiesana/padi-core/config"
-	"github.com/wibiesana/padi-core/response"
+	"github.com/wibiesana/padi_go_core/auth"
+	"github.com/wibiesana/padi_go_core/config"
+	"github.com/wibiesana/padi_go_core/response"
 
 	"github.com/go-chi/cors"
 )

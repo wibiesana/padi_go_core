@@ -6,9 +6,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/wibiesana/padi-core/config"
-	"github.com/wibiesana/padi-core/database"
-	"github.com/wibiesana/padi-core/queue"
+	"github.com/wibiesana/padi_go_core/config"
+	"github.com/wibiesana/padi_go_core/database"
+	"github.com/wibiesana/padi_go_core/queue"
 )
 
 func TestQueuePushAndWork(t *testing.T) {

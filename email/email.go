@@ -6,7 +6,7 @@ import (
 	"net/smtp"
 	"strings"
 
-	"github.com/wibiesana/padi-core/config"
+	"github.com/wibiesana/padi_go_core/config"
 )
 
 type Message struct {

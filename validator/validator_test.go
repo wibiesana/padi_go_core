@@ -3,7 +3,7 @@ package validator_test
 import (
 	"testing"
 
-	"github.com/wibiesana/padi-core/validator"
+	"github.com/wibiesana/padi_go_core/validator"
 )
 
 type SamplePayload struct {

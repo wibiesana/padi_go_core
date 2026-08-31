@@ -4,9 +4,9 @@ import (
 	"database/sql"
 	"testing"
 
-	"github.com/wibiesana/padi-core/config"
-	"github.com/wibiesana/padi-core/database"
-	"github.com/wibiesana/padi-core/migrator"
+	"github.com/wibiesana/padi_go_core/config"
+	"github.com/wibiesana/padi_go_core/database"
+	"github.com/wibiesana/padi_go_core/migrator"
 )
 
 func TestMigratorRunAndRollback(t *testing.T) {

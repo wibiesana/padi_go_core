@@ -5,9 +5,9 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/wibiesana/padi-core/auth"
-	"github.com/wibiesana/padi-core/config"
-	"github.com/wibiesana/padi-core/middleware"
+	"github.com/wibiesana/padi_go_core/auth"
+	"github.com/wibiesana/padi_go_core/config"
+	"github.com/wibiesana/padi_go_core/middleware"
 )
 
 func TestMiddlewareStack(t *testing.T) {

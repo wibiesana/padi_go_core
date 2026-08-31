@@ -10,9 +10,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/wibiesana/padi-core/database"
-	"github.com/wibiesana/padi-core/query"
-	"github.com/wibiesana/padi-core/response"
+	"github.com/wibiesana/padi_go_core/database"
+	"github.com/wibiesana/padi_go_core/query"
+	"github.com/wibiesana/padi_go_core/response"
 )
 
 // Model is the base interface that every Padi ActiveRecord model must implement

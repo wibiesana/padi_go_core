@@ -4,7 +4,7 @@ import (
 	"os"
 	"testing"
 
-	"github.com/wibiesana/padi-core/config"
+	"github.com/wibiesana/padi_go_core/config"
 )
 
 func TestConfigLoadAndHelpers(t *testing.T) {

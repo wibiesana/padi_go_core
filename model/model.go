@@ -3,9 +3,9 @@ package model
 import (
 	"database/sql"
 
-	"github.com/wibiesana/padi-core/activerecord"
-	"github.com/wibiesana/padi-core/query"
-	"github.com/wibiesana/padi-core/response"
+	"github.com/wibiesana/padi_go_core/activerecord"
+	"github.com/wibiesana/padi_go_core/query"
+	"github.com/wibiesana/padi_go_core/response"
 )
 
 // Type aliases to activerecord

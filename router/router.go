@@ -6,8 +6,8 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/wibiesana/padi-core/config"
-	"github.com/wibiesana/padi-core/middleware"
+	"github.com/wibiesana/padi_go_core/config"
+	"github.com/wibiesana/padi_go_core/middleware"
 
 	"github.com/go-chi/chi/v5"
 )

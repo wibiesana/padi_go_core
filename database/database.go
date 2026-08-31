@@ -10,7 +10,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/wibiesana/padi-core/config"
+	"github.com/wibiesana/padi_go_core/config"
 
 	_ "github.com/go-sql-driver/mysql"
 	_ "github.com/lib/pq"

@@ -6,7 +6,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/wibiesana/padi-core/response"
+	"github.com/wibiesana/padi_go_core/response"
 )
 
 func TestResponseHelpers(t *testing.T) {

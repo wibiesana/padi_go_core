@@ -4,10 +4,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/wibiesana/padi-core/config"
-	"github.com/wibiesana/padi-core/database"
-	"github.com/wibiesana/padi-core/model"
-	"github.com/wibiesana/padi-core/query"
+	"github.com/wibiesana/padi_go_core/config"
+	"github.com/wibiesana/padi_go_core/database"
+	"github.com/wibiesana/padi_go_core/model"
+	"github.com/wibiesana/padi_go_core/query"
 )
 
 type TestArticle struct {

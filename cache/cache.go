@@ -11,7 +11,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/wibiesana/padi-core/config"
+	"github.com/wibiesana/padi_go_core/config"
 
 	"github.com/redis/go-redis/v9"
 )
