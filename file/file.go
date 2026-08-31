@@ -33,6 +33,12 @@ func URL(r *http.Request, relativePath string) string {
 	return storage.URL(r, relativePath)
 }
 
+// URLOrNull generates absolute URL for stored relative path, or empty string if path is empty.
+// Safe to use on nullable database columns.
+func URLOrNull(r *http.Request, relativePath string) string {
+	return storage.URLOrNull(r, relativePath)
+}
+
 // Exists checks if file exists
 func Exists(relativePath string) bool {
 	return storage.Exists(relativePath)
