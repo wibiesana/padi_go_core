@@ -1069,28 +1069,36 @@ func GetTableColumns(tableName string) ([]string, error) {
 
 	if driver == "sqlite" {
 		rows, err := db.Query(fmt.Sprintf("PRAGMA table_info('%s')", tableName))
-		if err == nil {
-			defer rows.Close()
-			for rows.Next() {
-				var cid, notnull, pk int
-				var name, typeStr string
-				var dflt *string
-				if err := rows.Scan(&cid, &name, &typeStr, &notnull, &dflt, &pk); err == nil {
-					columns = append(columns, name)
-				}
+		if err != nil {
+			return nil, err
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var cid, notnull, pk int
+			var name, typeStr string
+			var dflt *string
+			if err := rows.Scan(&cid, &name, &typeStr, &notnull, &dflt, &pk); err == nil {
+				columns = append(columns, name)
 			}
+		}
+		if err := rows.Err(); err != nil {
+			return nil, err
 		}
 	} else if driver == "mysql" {
 		rows, err := db.Query(fmt.Sprintf("DESCRIBE `%s`", tableName))
-		if err == nil {
-			defer rows.Close()
-			for rows.Next() {
-				var field, typeStr, null, key, extra string
-				var def *string
-				if err := rows.Scan(&field, &typeStr, &null, &key, &def, &extra); err == nil {
-					columns = append(columns, field)
-				}
+		if err != nil {
+			return nil, err
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var field, typeStr, null, key, extra string
+			var def *string
+			if err := rows.Scan(&field, &typeStr, &null, &key, &def, &extra); err == nil {
+				columns = append(columns, field)
 			}
+		}
+		if err := rows.Err(); err != nil {
+			return nil, err
 		}
 	} else {
 		// Postgres
@@ -1099,14 +1107,18 @@ func GetTableColumns(tableName string) ([]string, error) {
 			FROM information_schema.columns 
 			WHERE table_name = $1 
 			ORDER BY ordinal_position`, tableName)
-		if err == nil {
-			defer rows.Close()
-			for rows.Next() {
-				var colName string
-				if err := rows.Scan(&colName); err == nil {
-					columns = append(columns, colName)
-				}
+		if err != nil {
+			return nil, err
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var colName string
+			if err := rows.Scan(&colName); err == nil {
+				columns = append(columns, colName)
 			}
+		}
+		if err := rows.Err(); err != nil {
+			return nil, err
 		}
 	}
 

@@ -82,6 +82,9 @@ func RunPending(db *sql.DB) error {
 			}
 		}
 	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
 
 	nextBatch := maxBatch + 1
 	ranCount := 0
@@ -150,6 +153,9 @@ func RollbackLast(db *sql.DB) error {
 		if err := rows.Scan(&name); err == nil {
 			batchMigs = append(batchMigs, name)
 		}
+	}
+	if err := rows.Err(); err != nil {
+		return err
 	}
 
 	migLookup := make(map[string]Migration)

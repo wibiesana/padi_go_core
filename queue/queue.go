@@ -40,7 +40,8 @@ func ensureQueueTable(db *sql.DB) error {
 	driver := database.GetDriver()
 	var createSQL string
 
-	if driver == "postgres" {
+	switch driver {
+	case "postgres":
 		createSQL = `CREATE TABLE IF NOT EXISTS jobs (
 			id SERIAL PRIMARY KEY,
 			queue VARCHAR(255) NOT NULL,
@@ -50,7 +51,7 @@ func ensureQueueTable(db *sql.DB) error {
 			available_at BIGINT NOT NULL,
 			created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 		)`
-	} else if driver == "mysql" {
+	case "mysql":
 		createSQL = `CREATE TABLE IF NOT EXISTS jobs (
 			id INT AUTO_INCREMENT PRIMARY KEY,
 			queue VARCHAR(255) NOT NULL,
@@ -61,7 +62,7 @@ func ensureQueueTable(db *sql.DB) error {
 			created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
 			INDEX idx_queue_avail (queue, available_at, reserved_at)
 		) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`
-	} else {
+	default:
 		createSQL = `CREATE TABLE IF NOT EXISTS jobs (
 			id INTEGER PRIMARY KEY AUTOINCREMENT,
 			queue TEXT NOT NULL,

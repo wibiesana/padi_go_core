@@ -99,7 +99,7 @@ func (w *Wizard) Run() error {
 	// 4. Construct .env content
 	var envBuilder strings.Builder
 	envBuilder.WriteString("# Application\n")
-	envBuilder.WriteString(fmt.Sprintf("APP_NAME=\"PADI REST API GO\"\n"))
+	envBuilder.WriteString("APP_NAME=\"PADI REST API GO\"\n")
 	envBuilder.WriteString(fmt.Sprintf("APP_ENV=%s\n", appEnv))
 	envBuilder.WriteString(fmt.Sprintf("APP_PORT=%s\n\n", appPort))
 

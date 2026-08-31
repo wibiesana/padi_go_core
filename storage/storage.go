@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"mime"
 	"mime/multipart"
 	"net/http"
 	"os"
@@ -16,10 +17,12 @@ import (
 	"github.com/wibiesana/padi_go_core/config"
 )
 
+// DangerousExtensions contains security-sensitive file extensions that cannot be uploaded
 var DangerousExtensions = map[string]bool{
 	"exe": true, "bat": true, "cmd": true, "sh": true, "php": true,
 	"phtml": true, "phar": true, "py": true, "rb": true, "js": true,
 	"jsp": true, "cgi": true, "pl": true, "dll": true, "so": true,
+	"msi": true, "com": true, "vbs": true, "hta": true,
 }
 
 // UploadOptions upload customization options
@@ -29,13 +32,80 @@ type UploadOptions struct {
 	MaxSizeBytes int64
 }
 
-// DefaultUploadOptions returns default 5MB image/document options
+// DefaultUploadOptions returns default 10MB image/document upload options
 func DefaultUploadOptions() UploadOptions {
 	return UploadOptions{
 		SubDir:       "uploads",
 		AllowedExts:  []string{"jpg", "jpeg", "png", "webp", "gif", "pdf", "docx", "xlsx", "zip"},
 		MaxSizeBytes: 10 * 1024 * 1024, // 10MB
 	}
+}
+
+// Upload extracts a multipart file directly from http.Request and saves it securely
+func Upload(r *http.Request, formKey string, opts ...UploadOptions) (string, error) {
+	if r == nil {
+		return "", errors.New("request is nil")
+	}
+
+	opt := DefaultUploadOptions()
+	if len(opts) > 0 {
+		opt = opts[0]
+	}
+
+	maxSize := opt.MaxSizeBytes
+	if maxSize <= 0 {
+		maxSize = 10 * 1024 * 1024
+	}
+
+	// Parse multipart form
+	if err := r.ParseMultipartForm(maxSize); err != nil {
+		return "", fmt.Errorf("failed to parse multipart form: %w", err)
+	}
+
+	file, header, err := r.FormFile(formKey)
+	if err != nil {
+		return "", fmt.Errorf("file form key '%s' not found: %w", formKey, err)
+	}
+	defer file.Close()
+
+	return SaveUploadedFile(header, opt)
+}
+
+// UploadMultiple uploads all files from a specific form key (e.g. multiple photos)
+func UploadMultiple(r *http.Request, formKey string, opts ...UploadOptions) ([]string, error) {
+	if r == nil {
+		return nil, errors.New("request is nil")
+	}
+
+	opt := DefaultUploadOptions()
+	if len(opts) > 0 {
+		opt = opts[0]
+	}
+
+	maxSize := opt.MaxSizeBytes
+	if maxSize <= 0 {
+		maxSize = 10 * 1024 * 1024
+	}
+
+	if err := r.ParseMultipartForm(maxSize); err != nil {
+		return nil, fmt.Errorf("failed to parse multipart form: %w", err)
+	}
+
+	headers := r.MultipartForm.File[formKey]
+	if len(headers) == 0 {
+		return nil, fmt.Errorf("no files found under key '%s'", formKey)
+	}
+
+	var paths []string
+	for _, fh := range headers {
+		savedPath, err := SaveUploadedFile(fh, opt)
+		if err != nil {
+			return paths, err
+		}
+		paths = append(paths, savedPath)
+	}
+
+	return paths, nil
 }
 
 // SaveUploadedFile validates and saves a multipart file securely
@@ -75,7 +145,7 @@ func SaveUploadedFile(fh *multipart.FileHeader, opts UploadOptions) (string, err
 	}
 	defer src.Close()
 
-	// Generate random filename to prevent collisions & directory traversal
+	// Generate random filename to prevent collisions & enumeration
 	randomBytes := make([]byte, 16)
 	_, _ = rand.Read(randomBytes)
 	randomHex := hex.EncodeToString(randomBytes)
@@ -104,12 +174,12 @@ func SaveUploadedFile(fh *multipart.FileHeader, opts UploadOptions) (string, err
 		return "", err
 	}
 
-	// Returns normalized relative path
+	// Returns normalized relative path (e.g. "uploads/20260831_abc.jpg")
 	relPath := filepath.ToSlash(filepath.Join(subDir, fileName))
 	return relPath, nil
 }
 
-// URL converts a relative file path (e.g. "uploads/2026_abc.jpg") to an absolute URL
+// URL converts a relative file path (e.g. "uploads/abc.jpg") to an absolute URL
 func URL(r *http.Request, relativePath string) string {
 	if relativePath == "" {
 		return ""
@@ -132,6 +202,45 @@ func URL(r *http.Request, relativePath string) string {
 	}
 
 	return fmt.Sprintf("%s://%s/storage/%s", scheme, host, strings.TrimPrefix(relativePath, "/"))
+}
+
+// Exists checks if a file exists in the storage directory
+func Exists(relativePath string) bool {
+	if relativePath == "" {
+		return false
+	}
+	fullPath := filepath.Join("storage", filepath.Clean(relativePath))
+	info, err := os.Stat(fullPath)
+	if err != nil {
+		return false
+	}
+	return !info.IsDir()
+}
+
+// Size returns the file size in bytes
+func Size(relativePath string) (int64, error) {
+	if relativePath == "" {
+		return 0, errors.New("empty path")
+	}
+	fullPath := filepath.Join("storage", filepath.Clean(relativePath))
+	info, err := os.Stat(fullPath)
+	if err != nil {
+		return 0, err
+	}
+	return info.Size(), nil
+}
+
+// MimeType detects the MIME type of a stored file
+func MimeType(relativePath string) (string, error) {
+	if relativePath == "" {
+		return "", errors.New("empty path")
+	}
+	ext := filepath.Ext(relativePath)
+	mimeType := mime.TypeByExtension(ext)
+	if mimeType == "" {
+		mimeType = "application/octet-stream"
+	}
+	return mimeType, nil
 }
 
 // Delete removes file from storage directory
