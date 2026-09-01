@@ -769,7 +769,7 @@ type {{ModelName}}Controller struct{}
 func (c *{{ModelName}}Controller) Index(w http.ResponseWriter, r *http.Request) {
 	opts := query.ParseOptions(r)
 	searchColumns := []string{{{SearchColumns}}}
-	meta, records, err := activerecord.Paginate[models.{{ModelName}}](opts, searchColumns, r.Context())
+	meta, records, err := activerecord.PaginateWithContext[models.{{ModelName}}](r.Context(), opts, searchColumns...)
 	if err != nil {
 		response.InternalServerError(w, "Failed to retrieve {{ModelName}} list")
 		return
@@ -781,7 +781,7 @@ func (c *{{ModelName}}Controller) Index(w http.ResponseWriter, r *http.Request) 
 
 // All retrieves all records without pagination
 func (c *{{ModelName}}Controller) All(w http.ResponseWriter, r *http.Request) {
-	records, err := activerecord.All[models.{{ModelName}}](r.Context())
+	records, err := activerecord.AllWithContext[models.{{ModelName}}](r.Context())
 	if err != nil {
 		response.InternalServerError(w, "Failed to retrieve all {{ModelName}}")
 		return
@@ -799,7 +799,7 @@ func (c *{{ModelName}}Controller) Show(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	item, err := activerecord.Find[models.{{ModelName}}](id, r.Context())
+	item, err := activerecord.FindWithContext[models.{{ModelName}}](r.Context(), id)
 	if err != nil || item == nil {
 		if err == sql.ErrNoRows || item == nil {
 			response.NotFound(w, "{{ModelName}} not found")
@@ -838,7 +838,7 @@ func (c *{{ModelName}}Controller) Update(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	item, err := activerecord.Find[models.{{ModelName}}](id, r.Context())
+	item, err := activerecord.FindWithContext[models.{{ModelName}}](r.Context(), id)
 	if err != nil || item == nil {
 		response.NotFound(w, "{{ModelName}} not found")
 		return
@@ -866,7 +866,7 @@ func (c *{{ModelName}}Controller) Destroy(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	item, err := activerecord.Find[models.{{ModelName}}](id, r.Context())
+	item, err := activerecord.FindWithContext[models.{{ModelName}}](r.Context(), id)
 	if err != nil || item == nil {
 		response.NotFound(w, "{{ModelName}} not found")
 		return

@@ -325,44 +325,31 @@ func GetPkConditions(m Model, id interface{}) (map[string]interface{}, error) {
 	return conditions, nil
 }
 
-func parseContextAndColumns(args []any) (context.Context, []string) {
-	var ctx context.Context
-	var cols []string
-
-	for _, arg := range args {
-		if arg == nil {
-			continue
-		}
-		switch v := arg.(type) {
-		case context.Context:
-			ctx = v
-		case string:
-			if v != "" {
-				cols = append(cols, v)
-			}
-		case []string:
-			cols = append(cols, v...)
-		}
-	}
-	return ctx, cols
-}
-
 // Find retrieves a single record by primary key (id)
-func Find[T Model](id interface{}, args ...any) (*T, error) {
-	return FindByPk[T](id, args...)
+func Find[T Model](id interface{}, columns ...string) (*T, error) {
+	return FindByPk[T](id, columns...)
 }
 
-// FindByPk retrieves record by primary key (accepts columns and/or context.Context)
-func FindByPk[T Model](id interface{}, args ...any) (*T, error) {
+// FindWithContext retrieves a single record by primary key with context
+func FindWithContext[T Model](ctx context.Context, id interface{}, columns ...string) (*T, error) {
+	return FindByPkWithContext[T](ctx, id, columns...)
+}
+
+// FindByPk retrieves record by primary key
+func FindByPk[T Model](id interface{}, columns ...string) (*T, error) {
+	return FindByPkWithContext[T](nil, id, columns...)
+}
+
+// FindByPkWithContext retrieves record by primary key with context
+func FindByPkWithContext[T Model](ctx context.Context, id interface{}, columns ...string) (*T, error) {
 	var item T
 	pkName := GetPrimaryKeyName(item)
 	q := query.New(item.TableName())
-	ctx, cols := parseContextAndColumns(args)
 	if ctx != nil {
 		q.WithContext(ctx)
 	}
-	if len(cols) > 0 {
-		q.Select(cols...)
+	if len(columns) > 0 {
+		q.Select(columns...)
 	}
 
 	err := q.Where(pkName, id).First(&item)
@@ -375,16 +362,20 @@ func FindByPk[T Model](id interface{}, args ...any) (*T, error) {
 	return &item, nil
 }
 
-// FindOne finds a single record by ID or conditions (accepts columns and/or context.Context)
-func FindOne[T Model](condition interface{}, args ...any) (*T, error) {
+// FindOne finds a single record by ID or conditions
+func FindOne[T Model](condition interface{}, columns ...string) (*T, error) {
+	return FindOneWithContext[T](nil, condition, columns...)
+}
+
+// FindOneWithContext finds a single record by ID or conditions with context
+func FindOneWithContext[T Model](ctx context.Context, condition interface{}, columns ...string) (*T, error) {
 	var item T
 	q := query.New(item.TableName())
-	ctx, cols := parseContextAndColumns(args)
 	if ctx != nil {
 		q.WithContext(ctx)
 	}
-	if len(cols) > 0 {
-		q.Select(cols...)
+	if len(columns) > 0 {
+		q.Select(columns...)
 	}
 
 	if condMap, ok := condition.(map[string]interface{}); ok {
@@ -401,7 +392,7 @@ func FindOne[T Model](condition interface{}, args ...any) (*T, error) {
 		return &item, nil
 	}
 
-	return FindByPk[T](condition, args...)
+	return FindByPkWithContext[T](ctx, condition, columns...)
 }
 
 // FindAll finds multiple records by primary key(s) or condition map
@@ -441,9 +432,14 @@ func FindAll[T Model](condition ...interface{}) ([]T, error) {
 	return records, nil
 }
 
-// FindOrFail retrieves a single record by primary key or returns 404 error (accepts columns and/or context.Context)
-func FindOrFail[T Model](id interface{}, args ...any) (*T, error) {
-	item, err := FindByPk[T](id, args...)
+// FindOrFail retrieves a single record by primary key or returns 404 error
+func FindOrFail[T Model](id interface{}, columns ...string) (*T, error) {
+	return FindOrFailWithContext[T](nil, id, columns...)
+}
+
+// FindOrFailWithContext retrieves a single record by primary key with context
+func FindOrFailWithContext[T Model](ctx context.Context, id interface{}, columns ...string) (*T, error) {
+	item, err := FindByPkWithContext[T](ctx, id, columns...)
 	if err != nil {
 		return nil, err
 	}
@@ -467,17 +463,21 @@ func FindBy[T Model](column string, val interface{}) (*T, error) {
 	return &item, nil
 }
 
-// All retrieves all records for the model (accepts columns and/or context.Context)
-func All[T Model](args ...any) ([]T, error) {
+// All retrieves all records for the model
+func All[T Model](columns ...string) ([]T, error) {
+	return AllWithContext[T](nil, columns...)
+}
+
+// AllWithContext retrieves all records for the model with context
+func AllWithContext[T Model](ctx context.Context, columns ...string) ([]T, error) {
 	var zero T
 	var records []T
 	q := query.New(zero.TableName())
-	ctx, cols := parseContextAndColumns(args)
 	if ctx != nil {
 		q.WithContext(ctx)
 	}
-	if len(cols) > 0 {
-		q.Select(cols...)
+	if len(columns) > 0 {
+		q.Select(columns...)
 	}
 	if ord, ok := any(zero).(DefaultOrderer); ok {
 		if d := ord.DefaultOrder(); d != "" {
@@ -501,9 +501,14 @@ func All[T Model](args ...any) ([]T, error) {
 	return records, nil
 }
 
-// Get retrieves all records with eager-loading if configured (accepts columns and/or context.Context)
-func Get[T Model](args ...any) ([]T, error) {
-	return All[T](args...)
+// Get retrieves all records with eager-loading if configured
+func Get[T Model](columns ...string) ([]T, error) {
+	return All[T](columns...)
+}
+
+// GetWithContext retrieves all records with context
+func GetWithContext[T Model](ctx context.Context, columns ...string) ([]T, error) {
+	return AllWithContext[T](ctx, columns...)
 }
 
 // Where starts a query builder for model
@@ -534,17 +539,21 @@ func Count[T Model](conditions ...map[string]interface{}) (int64, error) {
 	return q.Count()
 }
 
-// Paginate executes query pagination for model (accepts searchColumns and/or context.Context)
-func Paginate[T Model](opts query.Options, args ...any) (response.Pagination, []T, error) {
+// Paginate executes query pagination for model
+func Paginate[T Model](opts query.Options, searchColumns ...string) (response.Pagination, []T, error) {
+	return PaginateWithContext[T](nil, opts, searchColumns...)
+}
+
+// PaginateWithContext executes query pagination for model with context
+func PaginateWithContext[T Model](ctx context.Context, opts query.Options, searchColumns ...string) (response.Pagination, []T, error) {
 	var zero T
 	var records []T
 	q := query.New(zero.TableName())
-	ctx, searchCols := parseContextAndColumns(args)
 	if ctx != nil {
 		q.WithContext(ctx)
 	}
 
-	meta, err := q.Paginate(opts, searchCols, &records)
+	meta, err := q.Paginate(opts, searchColumns, &records)
 	if err != nil {
 		return response.Pagination{}, nil, err
 	}

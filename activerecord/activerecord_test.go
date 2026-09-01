@@ -76,7 +76,7 @@ func TestActiveRecord(t *testing.T) {
 
 	// Test passing columns as slice
 	cols := []string{"id", "title"}
-	allWithCols, err := activerecord.All[TestArticle](cols)
+	allWithCols, err := activerecord.All[TestArticle](cols...)
 	if err != nil || len(allWithCols) != 1 {
 		t.Fatalf("failed All with slice columns: %v", err)
 	}
@@ -88,7 +88,7 @@ func TestActiveRecord(t *testing.T) {
 	}
 
 	opts := query.Options{Page: 1, PerPage: 10}
-	meta, list, err := activerecord.Paginate[TestArticle](opts, []string{"title"})
+	meta, list, err := activerecord.Paginate[TestArticle](opts, "title")
 	if err != nil || len(list) != 1 || meta.Total != 1 {
 		t.Fatalf("paginate failed")
 	}

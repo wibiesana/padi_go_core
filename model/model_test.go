@@ -116,7 +116,7 @@ func TestActiveRecordCRUD(t *testing.T) {
 	}
 
 	opts := query.Options{Page: 1, PerPage: 10}
-	meta, list, err := model.Paginate[TestArticle](opts, []string{"title", "content"})
+	meta, list, err := model.Paginate[TestArticle](opts, "title", "content")
 	if err != nil || len(list) != 1 {
 		t.Fatalf("expected 1 item in paginated list, got %d, err: %v", len(list), err)
 	}
