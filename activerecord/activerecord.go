@@ -1379,6 +1379,126 @@ func FilterFillable(m Model, data map[string]interface{}) map[string]interface{}
 // HideFields is a placeholder for hiding sensitive fields during array transformations
 func HideFields(items interface{}) {}
 
+var (
+	relationCache   = make(map[string]map[string]any)
+	relationCacheMu sync.RWMutex
+)
+
+// ClearRelationCache resets the relation query cache
+func ClearRelationCache() {
+	relationCacheMu.Lock()
+	defer relationCacheMu.Unlock()
+	relationCache = make(map[string]map[string]any)
+}
+
+// FindRelation fetches a related record map and its primary display field with in-memory caching
+func FindRelation(table string, id any, displayCol ...string) (map[string]any, any) {
+	if isNilOrZero(id) {
+		return nil, nil
+	}
+
+	targetCol := "name"
+	if len(displayCol) > 0 && displayCol[0] != "" {
+		targetCol = displayCol[0]
+	}
+
+	cacheKey := fmt.Sprintf("%s:%v:%s", table, id, targetCol)
+	relationCacheMu.RLock()
+	if cached, ok := relationCache[cacheKey]; ok {
+		relationCacheMu.RUnlock()
+		return cached, cached[targetCol]
+	}
+	relationCacheMu.RUnlock()
+
+	db := database.GetDB()
+	if db == nil {
+		return nil, nil
+	}
+	driver := database.GetDriver()
+
+	// Try with provided table name, and fallback to singular/plural
+	tablesToTry := []string{table}
+	if strings.HasSuffix(table, "s") {
+		tablesToTry = append(tablesToTry, strings.TrimSuffix(table, "s"))
+	} else {
+		tablesToTry = append(tablesToTry, table+"s")
+	}
+
+	for _, tbl := range tablesToTry {
+		cols, err := GetTableColumns(tbl)
+		if err != nil || len(cols) == 0 {
+			continue
+		}
+
+		colMap := make(map[string]bool, len(cols))
+		for _, c := range cols {
+			colMap[strings.ToLower(c)] = true
+		}
+
+		selectedCols := []string{"id"}
+		if colMap[strings.ToLower(targetCol)] {
+			selectedCols = append(selectedCols, targetCol)
+		} else {
+			// Find suitable fallback display column
+			candidates := []string{"username", "name", "nama", "title", "judul", "email", "code"}
+			for _, cand := range candidates {
+				if colMap[cand] {
+					selectedCols = append(selectedCols, cand)
+					targetCol = cand
+					break
+				}
+			}
+		}
+
+		ph := "?"
+		if driver == "postgres" {
+			ph = "$1"
+		}
+
+		querySQL := fmt.Sprintf("SELECT %s FROM %s WHERE id = %s LIMIT 1", strings.Join(selectedCols, ", "), tbl, ph)
+		rows, err := db.Query(querySQL, id)
+		if err != nil {
+			continue
+		}
+
+		rowCols, _ := rows.Columns()
+		if !rows.Next() {
+			rows.Close()
+			continue
+		}
+
+		values := make([]interface{}, len(rowCols))
+		scanArgs := make([]interface{}, len(rowCols))
+		for i := range values {
+			scanArgs[i] = &values[i]
+		}
+
+		if err := rows.Scan(scanArgs...); err != nil {
+			rows.Close()
+			continue
+		}
+		rows.Close()
+
+		res := make(map[string]any)
+		for i, c := range rowCols {
+			val := values[i]
+			if b, ok := val.([]byte); ok {
+				res[c] = string(b)
+			} else {
+				res[c] = val
+			}
+		}
+
+		relationCacheMu.Lock()
+		relationCache[cacheKey] = res
+		relationCacheMu.Unlock()
+
+		return res, res[targetCol]
+	}
+
+	return nil, nil
+}
+
 // LoadRelations loads defined relations for a collection of models
 func LoadRelations(items interface{}, relations ...string) error {
 	return nil
