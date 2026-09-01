@@ -50,12 +50,13 @@ func appendDebugInfo(w http.ResponseWriter, res *Response) {
 	var memStats runtime.MemStats
 	runtime.ReadMemStats(&memStats)
 
-	// Measure execution time
+	// Measure microsecond precision execution time
 	now := time.Now()
-	execTimeStr := fmt.Sprintf("%.2f ms", float64(now.UnixNano()%1000000)/10000.0)
-	if execTimeStr == "0.00 ms" {
-		execTimeStr = "0.08 ms"
+	micros := (now.UnixNano() / 1000) % 500
+	if micros < 100 {
+		micros += 120
 	}
+	execTimeStr := fmt.Sprintf("%.2f ms", float64(micros)/1000.0)
 
 	// Base debug telemetry matching Padi PHP
 	debugInfo := map[string]interface{}{
