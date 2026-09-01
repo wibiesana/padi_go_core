@@ -10,6 +10,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/wibiesana/padi_go_core/database"
@@ -17,7 +18,16 @@ import (
 	"github.com/wibiesana/padi_go_core/router"
 )
 
-const Version = "2.1.11"
+
+const Version = "2.1.12"
+
+// pgPlaceholderRe matches a single PostgreSQL positional placeholder ($1, $2, ...)
+// Compiled once at package init for use in RawSQL interpolation.
+var pgPlaceholderRe = regexp.MustCompile(`\$\d+`)
+
+// structFieldCache caches column-name → reflect.Value mappings per struct type
+// to avoid repeated reflection on every query row scan.
+var structFieldCache sync.Map // key: reflect.Type → map[string]int (field index path)
 
 // Options pagination and query parameters
 type Options struct {
@@ -304,7 +314,7 @@ func (q *Query) WhereNotIn(column string, values ...interface{}) *Query {
 	return q
 }
 
-// WhereNot adds a negated condition (WHERE NOT (...))
+// WhereNot adds a negated AND NOT condition without resetting existing clauses.
 func (q *Query) WhereNot(column string, args ...interface{}) *Query {
 	op := "="
 	var val interface{}
@@ -316,8 +326,12 @@ func (q *Query) WhereNot(column string, args ...interface{}) *Query {
 	}
 	ph := q.nextPlaceholder()
 	clause := fmt.Sprintf("NOT (%s %s %s)", column, op, ph)
-	q.wheres = []string{clause}
-	q.args = []interface{}{val}
+	if len(q.wheres) == 0 {
+		q.wheres = append(q.wheres, clause)
+	} else {
+		q.wheres = append(q.wheres, "AND", clause)
+	}
+	q.args = append(q.args, val)
 	return q
 }
 
@@ -752,7 +766,7 @@ func (q *Query) BuildSQL() (string, []interface{}) {
 	return sqlStr.String(), allArgs
 }
 
-// RawSQL returns raw interpolated SQL string for debugging
+// RawSQL returns raw interpolated SQL string for debugging (not for execution).
 func (q *Query) RawSQL() string {
 	sqlStr, args := q.BuildSQL()
 	for _, arg := range args {
@@ -772,8 +786,8 @@ func (q *Query) RawSQL() string {
 			valStr = fmt.Sprintf("%v", v)
 		}
 		if q.driver == "postgres" {
-			re := regexp.MustCompile(`\$\d+`)
-			loc := re.FindStringIndex(sqlStr)
+			// Replace the first $N placeholder using pre-compiled regex
+			loc := pgPlaceholderRe.FindStringIndex(sqlStr)
 			if loc != nil {
 				sqlStr = sqlStr[:loc[0]] + valStr + sqlStr[loc[1]:]
 			}
@@ -1140,7 +1154,7 @@ func (q *Query) Delete() (int64, error) {
 	return res.RowsAffected()
 }
 
-// scanStruct maps database row columns to struct fields
+// scanStruct maps database row columns to struct fields using cached field index map.
 func scanStruct(rows *sql.Rows, dest interface{}) error {
 	destVal := reflect.ValueOf(dest)
 	if destVal.Kind() != reflect.Ptr || destVal.IsNil() {
@@ -1157,8 +1171,8 @@ func scanStruct(rows *sql.Rows, dest interface{}) error {
 		return err
 	}
 
-	fieldMap := make(map[string]reflect.Value)
-	mapStructFields(structVal, fieldMap)
+	// Use cached type-level field index map for zero-alloc field lookup
+	entry := getStructFieldEntry(structVal.Type())
 
 	values := make([]interface{}, len(cols))
 	scanPointers := make([]interface{}, len(cols))
@@ -1172,12 +1186,58 @@ func scanStruct(rows *sql.Rows, dest interface{}) error {
 
 	for i, col := range cols {
 		colLower := strings.ToLower(col)
-		if field, exists := fieldMap[colLower]; exists && field.CanSet() {
-			assignField(field, values[i])
+		if idxPath, exists := entry.tagToIdx[colLower]; exists {
+			field := structVal.FieldByIndex(idxPath)
+			if field.CanSet() {
+				assignField(field, values[i])
+			}
 		}
 	}
 
 	return nil
+}
+
+// structFieldEntry caches tag → field index mapping per struct type
+type structFieldEntry struct {
+	tagToIdx map[string][]int // column name (lowercased) → FieldByIndex path
+}
+
+// getStructFieldEntry returns (or builds and caches) the tag-to-field-index map for a struct type.
+func getStructFieldEntry(typ reflect.Type) *structFieldEntry {
+	if v, ok := structFieldCache.Load(typ); ok {
+		return v.(*structFieldEntry)
+	}
+	entry := &structFieldEntry{tagToIdx: make(map[string][]int)}
+	buildStructFieldEntry(typ, nil, entry)
+	structFieldCache.Store(typ, entry)
+	return entry
+}
+
+func buildStructFieldEntry(typ reflect.Type, indexPath []int, entry *structFieldEntry) {
+	for i := 0; i < typ.NumField(); i++ {
+		sf := typ.Field(i)
+		path := append(append([]int(nil), indexPath...), i)
+
+		if sf.Anonymous && sf.Type.Kind() == reflect.Struct {
+			buildStructFieldEntry(sf.Type, path, entry)
+			continue
+		}
+
+		tag := sf.Tag.Get("db")
+		if tag == "" {
+			tag = sf.Tag.Get("json")
+		}
+		if tag != "" && tag != "-" {
+			colName := strings.ToLower(strings.Split(tag, ",")[0])
+			if _, exists := entry.tagToIdx[colName]; !exists {
+				entry.tagToIdx[colName] = path
+			}
+		}
+		fieldNameLower := strings.ToLower(sf.Name)
+		if _, exists := entry.tagToIdx[fieldNameLower]; !exists {
+			entry.tagToIdx[fieldNameLower] = path
+		}
+	}
 }
 
 func mapStructFields(val reflect.Value, fieldMap map[string]reflect.Value) {

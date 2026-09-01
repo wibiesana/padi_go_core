@@ -140,6 +140,7 @@ func Connect(cfg *config.Config) (*sql.DB, error) {
 	db.SetMaxIdleConns(10)
 	db.SetMaxOpenConns(100)
 	db.SetConnMaxLifetime(time.Hour)
+	db.SetConnMaxIdleTime(30 * time.Minute)
 
 	if err := db.Ping(); err != nil {
 		return nil, fmt.Errorf("failed to ping database: %w", err)
@@ -149,25 +150,26 @@ func Connect(cfg *config.Config) (*sql.DB, error) {
 	return db, nil
 }
 
-// GetDB returns current active DB instance
+// GetDB returns current active DB instance, initializing from config if not yet connected.
+// Safe for concurrent use.
 func GetDB() *sql.DB {
 	mu.RLock()
-	if DB != nil {
-		defer mu.RUnlock()
-		return DB
-	}
+	db := DB
 	mu.RUnlock()
+	if db != nil {
+		return db
+	}
 
 	log.Println("Initializing database with default config...")
 	cfg := config.AppConfig
 	if cfg == nil {
 		cfg = config.Load()
 	}
-	db, err := Connect(cfg)
+	connected, err := Connect(cfg)
 	if err != nil {
 		log.Fatalf("Fatal: could not initialize database: %v", err)
 	}
-	return db
+	return connected
 }
 
 // GetDriver returns the active database driver (sqlite, mysql, postgres)

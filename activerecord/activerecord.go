@@ -111,11 +111,24 @@ type columnCacheEntry struct {
 	cachedAt time.Time
 }
 
+// relationCacheEntry holds a cached relation result with an expiry timestamp
+type relationCacheEntry struct {
+	value    *Map
+	cachedAt time.Time
+}
+
+// orderByRegex validates ORDER BY segment — compiled once at package init
+var orderByRegex = regexp.MustCompile(`^[a-zA-Z_][a-zA-Z0-9_.]*(` + "`" + `|\s+(?i:ASC|DESC))?$`)
+
 var (
 	columnsCache    = make(map[string]columnCacheEntry)
 	columnsCacheMu  sync.RWMutex
 	columnsCacheTTL = time.Hour
+
+	// relationCacheTTL controls how long FindRelation results are cached (default 5 minutes)
+	relationCacheTTL = 5 * time.Minute
 )
+
 
 // ClearColumnsCache resets cached table columns
 func ClearColumnsCache() {
@@ -293,21 +306,21 @@ func Search[T Model](keyword string, extraColumns ...string) *query.Query {
 	return q
 }
 
-// SanitizeOrderBy sanitizes an ORDER BY clause to prevent SQL injection
+// SanitizeOrderBy sanitizes an ORDER BY clause to prevent SQL injection.
+// Uses a package-level pre-compiled regex for performance.
 func SanitizeOrderBy(orderBy string) (string, error) {
 	if orderBy == "" {
 		return "", nil
 	}
 	segments := strings.Split(orderBy, ",")
 	var validSegments []string
-	regex := regexp.MustCompile(`^[a-zA-Z_][a-zA-Z0-9_.]*(\s+(?i:ASC|DESC))?$`)
 
 	for _, seg := range segments {
 		trimmed := strings.TrimSpace(seg)
 		if trimmed == "" {
 			continue
 		}
-		if !regex.MatchString(trimmed) {
+		if !orderByRegex.MatchString(trimmed) {
 			return "", fmt.Errorf("invalid ORDER BY segment: %s", trimmed)
 		}
 		validSegments = append(validSegments, trimmed)
@@ -831,17 +844,32 @@ func Save(m any, contexts ...context.Context) error {
 		}
 	}
 
-	// Filter fieldValues to only include columns that actually exist in the table (if table columns are introspectable)
-	if tableCols, err := GetTableColumns(tableName); err == nil && len(tableCols) > 0 {
-		colMap := make(map[string]bool, len(tableCols))
+	// Fetch table columns once — used for both field filtering and audit column detection
+	tableCols, _ := GetTableColumns(tableName)
+	var colMap map[string]bool
+	if len(tableCols) > 0 {
+		colMap = make(map[string]bool, len(tableCols))
 		for _, tc := range tableCols {
 			colMap[strings.ToLower(tc)] = true
 		}
+		// Strip struct fields not present in the actual table schema
 		for k := range fieldValues {
 			if !colMap[strings.ToLower(k)] {
 				delete(fieldValues, k)
 			}
 		}
+	}
+
+	// applyAuditField is a helper that applies an audit value if the column exists in the table
+	applyAuditField := func(fieldKey string, value interface{}) {
+		k := strings.ToLower(fieldKey)
+		if colMap == nil || colMap[k] {
+			fieldValues[k] = value
+			setStructFieldsFromMap(val, map[string]interface{}{fieldKey: value})
+		}
+	}
+	hasCol := func(fieldKey string) bool {
+		return colMap == nil || colMap[strings.ToLower(fieldKey)]
 	}
 
 	if isUpdate {
@@ -854,35 +882,14 @@ func Save(m any, contexts ...context.Context) error {
 			delete(fieldValues, strings.ToLower(createdByCol))
 		}
 		if useAudit {
-			if tableCols, err := GetTableColumns(tableName); err == nil && len(tableCols) > 0 {
-				colMap := make(map[string]bool, len(tableCols))
-				for _, tc := range tableCols {
-					colMap[strings.ToLower(tc)] = true
-				}
-				if updatedAtCol != "" && colMap[strings.ToLower(updatedAtCol)] {
-					fieldValues[strings.ToLower(updatedAtCol)] = now
-					setStructFieldsFromMap(val, map[string]interface{}{updatedAtCol: now})
-				}
-				if updatedByCol != "" && colMap[strings.ToLower(updatedByCol)] {
-					if userID > 0 {
-						fieldValues[strings.ToLower(updatedByCol)] = userID
-						setStructFieldsFromMap(val, map[string]interface{}{updatedByCol: userID})
-					} else if isNilOrZero(fieldValues[strings.ToLower(updatedByCol)]) {
-						delete(fieldValues, strings.ToLower(updatedByCol))
-					}
-				}
-			} else {
-				if updatedAtCol != "" {
-					fieldValues[strings.ToLower(updatedAtCol)] = now
-					setStructFieldsFromMap(val, map[string]interface{}{updatedAtCol: now})
-				}
-				if updatedByCol != "" {
-					if userID > 0 {
-						fieldValues[strings.ToLower(updatedByCol)] = userID
-						setStructFieldsFromMap(val, map[string]interface{}{updatedByCol: userID})
-					} else if isNilOrZero(fieldValues[strings.ToLower(updatedByCol)]) {
-						delete(fieldValues, strings.ToLower(updatedByCol))
-					}
+			if updatedAtCol != "" && hasCol(updatedAtCol) {
+				applyAuditField(updatedAtCol, now)
+			}
+			if updatedByCol != "" && hasCol(updatedByCol) {
+				if userID > 0 {
+					applyAuditField(updatedByCol, userID)
+				} else if isNilOrZero(fieldValues[strings.ToLower(updatedByCol)]) {
+					delete(fieldValues, strings.ToLower(updatedByCol))
 				}
 			}
 		}
@@ -927,71 +934,28 @@ func Save(m any, contexts ...context.Context) error {
 	// INSERT
 	delete(fieldValues, pkName)
 	if useAudit {
-		if tableCols, err := GetTableColumns(tableName); err == nil && len(tableCols) > 0 {
-			colMap := make(map[string]bool, len(tableCols))
-			for _, tc := range tableCols {
-				colMap[strings.ToLower(tc)] = true
-			}
-			if createdAtCol != "" && colMap[strings.ToLower(createdAtCol)] {
-				if isNilOrZero(fieldValues[strings.ToLower(createdAtCol)]) {
-					fieldValues[strings.ToLower(createdAtCol)] = now
-					setStructFieldsFromMap(val, map[string]interface{}{createdAtCol: now})
+		if createdAtCol != "" && hasCol(createdAtCol) && isNilOrZero(fieldValues[strings.ToLower(createdAtCol)]) {
+			applyAuditField(createdAtCol, now)
+		}
+		if updatedAtCol != "" && hasCol(updatedAtCol) && isNilOrZero(fieldValues[strings.ToLower(updatedAtCol)]) {
+			applyAuditField(updatedAtCol, now)
+		}
+		if createdByCol != "" && hasCol(createdByCol) {
+			if userID > 0 {
+				if isNilOrZero(fieldValues[strings.ToLower(createdByCol)]) {
+					applyAuditField(createdByCol, userID)
 				}
+			} else if isNilOrZero(fieldValues[strings.ToLower(createdByCol)]) {
+				fieldValues[strings.ToLower(createdByCol)] = nil
 			}
-			if updatedAtCol != "" && colMap[strings.ToLower(updatedAtCol)] {
-				if isNilOrZero(fieldValues[strings.ToLower(updatedAtCol)]) {
-					fieldValues[strings.ToLower(updatedAtCol)] = now
-					setStructFieldsFromMap(val, map[string]interface{}{updatedAtCol: now})
+		}
+		if updatedByCol != "" && hasCol(updatedByCol) {
+			if userID > 0 {
+				if isNilOrZero(fieldValues[strings.ToLower(updatedByCol)]) {
+					applyAuditField(updatedByCol, userID)
 				}
-			}
-			if createdByCol != "" && colMap[strings.ToLower(createdByCol)] {
-				if userID > 0 {
-					if isNilOrZero(fieldValues[strings.ToLower(createdByCol)]) {
-						fieldValues[strings.ToLower(createdByCol)] = userID
-						setStructFieldsFromMap(val, map[string]interface{}{createdByCol: userID})
-					}
-				} else if isNilOrZero(fieldValues[strings.ToLower(createdByCol)]) {
-					fieldValues[strings.ToLower(createdByCol)] = nil
-				}
-			}
-			if updatedByCol != "" && colMap[strings.ToLower(updatedByCol)] {
-				if userID > 0 {
-					if isNilOrZero(fieldValues[strings.ToLower(updatedByCol)]) {
-						fieldValues[strings.ToLower(updatedByCol)] = userID
-						setStructFieldsFromMap(val, map[string]interface{}{updatedByCol: userID})
-					}
-				} else if isNilOrZero(fieldValues[strings.ToLower(updatedByCol)]) {
-					fieldValues[strings.ToLower(updatedByCol)] = nil
-				}
-			}
-		} else {
-			if createdAtCol != "" && isNilOrZero(fieldValues[strings.ToLower(createdAtCol)]) {
-				fieldValues[strings.ToLower(createdAtCol)] = now
-				setStructFieldsFromMap(val, map[string]interface{}{createdAtCol: now})
-			}
-			if updatedAtCol != "" && isNilOrZero(fieldValues[strings.ToLower(updatedAtCol)]) {
-				fieldValues[strings.ToLower(updatedAtCol)] = now
-				setStructFieldsFromMap(val, map[string]interface{}{updatedAtCol: now})
-			}
-			if createdByCol != "" {
-				if userID > 0 {
-					if isNilOrZero(fieldValues[strings.ToLower(createdByCol)]) {
-						fieldValues[strings.ToLower(createdByCol)] = userID
-						setStructFieldsFromMap(val, map[string]interface{}{createdByCol: userID})
-					}
-				} else if isNilOrZero(fieldValues[strings.ToLower(createdByCol)]) {
-					fieldValues[strings.ToLower(createdByCol)] = nil
-				}
-			}
-			if updatedByCol != "" {
-				if userID > 0 {
-					if isNilOrZero(fieldValues[strings.ToLower(updatedByCol)]) {
-						fieldValues[strings.ToLower(updatedByCol)] = userID
-						setStructFieldsFromMap(val, map[string]interface{}{updatedByCol: userID})
-					}
-				} else if isNilOrZero(fieldValues[strings.ToLower(updatedByCol)]) {
-					fieldValues[strings.ToLower(updatedByCol)] = nil
-				}
+			} else if isNilOrZero(fieldValues[strings.ToLower(updatedByCol)]) {
+				fieldValues[strings.ToLower(updatedByCol)] = nil
 			}
 		}
 	}
@@ -1169,7 +1133,9 @@ func SoftDeleteByID[T Model](id interface{}) error {
 	return SoftDelete(item)
 }
 
-// BatchInsert inserts multiple struct records in chunks
+// BatchInsert inserts multiple struct records using multi-row bulk INSERT for high performance.
+// Bulk INSERT batches up to chunkSize rows per statement (default 500).
+// Falls back to individual Save() per item if table schema cannot be introspected.
 func BatchInsert[T Model](items []T, chunkSize ...int) error {
 	if len(items) == 0 {
 		return nil
@@ -1180,6 +1146,43 @@ func BatchInsert[T Model](items []T, chunkSize ...int) error {
 		size = chunkSize[0]
 	}
 
+	db := database.GetDB()
+	driver := database.GetDriver()
+
+	var zero T
+	tableName := zero.TableName()
+
+	// Introspect columns once
+	tableCols, _ := GetTableColumns(tableName)
+	if len(tableCols) == 0 {
+		// Fallback: row-by-row Save
+		for i := 0; i < len(items); i++ {
+			if err := Save(&items[i]); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+
+	// Build allowed column set (excluding pk "id")
+	colSet := make(map[string]bool, len(tableCols))
+	var orderedCols []string
+	for _, c := range tableCols {
+		lc := strings.ToLower(c)
+		if lc == "id" {
+			continue
+		}
+		if !colSet[lc] {
+			colSet[lc] = true
+			orderedCols = append(orderedCols, c)
+		}
+	}
+	if len(orderedCols) == 0 {
+		return fmt.Errorf("BatchInsert: no writable columns found for table %s", tableName)
+	}
+
+	now := time.Now().UTC()
+
 	for i := 0; i < len(items); i += size {
 		end := i + size
 		if end > len(items) {
@@ -1187,10 +1190,48 @@ func BatchInsert[T Model](items []T, chunkSize ...int) error {
 		}
 		chunk := items[i:end]
 
+		var valuePlaceholders []string
+		var args []interface{}
+		idx := 1
+
 		for _, item := range chunk {
-			if err := Save(item); err != nil {
-				return err
+			rv := reflect.ValueOf(item)
+			if rv.Kind() == reflect.Ptr {
+				rv = rv.Elem()
 			}
+			fv := extractFieldMap(rv)
+
+			// Apply audit defaults
+			for _, tc := range []string{"created_at", "updated_at"} {
+				if colSet[tc] && isNilOrZero(fv[tc]) {
+					fv[tc] = now
+				}
+			}
+
+			rowPhs := make([]string, len(orderedCols))
+			for j, col := range orderedCols {
+				if driver == "postgres" {
+					rowPhs[j] = fmt.Sprintf("$%d", idx)
+				} else {
+					rowPhs[j] = "?"
+				}
+				args = append(args, fv[strings.ToLower(col)])
+				idx++
+			}
+			valuePlaceholders = append(valuePlaceholders, "("+strings.Join(rowPhs, ", ")+")")
+		}
+
+		colNames := make([]string, len(orderedCols))
+		copy(colNames, orderedCols)
+
+		sqlStr := fmt.Sprintf("INSERT INTO %s (%s) VALUES %s",
+			tableName,
+			strings.Join(colNames, ", "),
+			strings.Join(valuePlaceholders, ", "),
+		)
+
+		if _, err := db.Exec(sqlStr, args...); err != nil {
+			return err
 		}
 	}
 	return nil
@@ -1260,7 +1301,8 @@ func Upsert[T Model](data map[string]interface{}, updateColumns ...string) (int6
 	return res.RowsAffected()
 }
 
-// Query executes raw SQL query into mapped struct slice
+// Query executes raw SQL query into mapped struct slice.
+// rows.Columns() is called once before the iteration loop for efficiency.
 func Query[T any](sqlStr string, args ...interface{}) ([]T, error) {
 	db := database.GetDB()
 	rows, err := db.Query(sqlStr, args...)
@@ -1269,11 +1311,17 @@ func Query[T any](sqlStr string, args ...interface{}) ([]T, error) {
 	}
 	defer rows.Close()
 
+	// Fetch column names once — not per row
+	cols, err := rows.Columns()
+	if err != nil {
+		return nil, err
+	}
+
 	var records []T
+	var fieldMap map[string]reflect.Value // lazily built once for struct types
+
 	for rows.Next() {
 		var item T
-		val := reflect.ValueOf(&item)
-		cols, _ := rows.Columns()
 		values := make([]interface{}, len(cols))
 		for i := range values {
 			var v interface{}
@@ -1282,9 +1330,12 @@ func Query[T any](sqlStr string, args ...interface{}) ([]T, error) {
 		if err := rows.Scan(values...); err != nil {
 			return nil, err
 		}
+		val := reflect.ValueOf(&item)
 		if val.Elem().Kind() == reflect.Struct {
-			fieldMap := make(map[string]reflect.Value)
-			mapStructFields(val.Elem(), fieldMap)
+			if fieldMap == nil {
+				fieldMap = make(map[string]reflect.Value)
+				mapStructFields(val.Elem(), fieldMap)
+			}
 			for i, col := range cols {
 				if f, ok := fieldMap[strings.ToLower(col)]; ok && f.CanSet() {
 					raw := reflect.ValueOf(values[i]).Elem().Interface()
@@ -1468,7 +1519,7 @@ func (m *Map) MarshalJSON() ([]byte, error) {
 }
 
 var (
-	relationCache   = make(map[string]*Map)
+	relationCache   = make(map[string]relationCacheEntry)
 	relationCacheMu sync.RWMutex
 )
 
@@ -1476,10 +1527,11 @@ var (
 func ClearRelationCache() {
 	relationCacheMu.Lock()
 	defer relationCacheMu.Unlock()
-	relationCache = make(map[string]*Map)
+	relationCache = make(map[string]relationCacheEntry)
 }
 
-// FindRelation fetches a related record map and its primary display field with in-memory caching
+// FindRelation fetches a related record map and its primary display field with TTL-bounded in-memory caching.
+// Both positive hits (record found) and negative hits (record not found) are cached with a TTL.
 func FindRelation(table string, id any, displayCol ...string) (*Map, any) {
 	if isNilOrZero(id) {
 		return nil, nil
@@ -1491,14 +1543,17 @@ func FindRelation(table string, id any, displayCol ...string) (*Map, any) {
 	}
 
 	cacheKey := fmt.Sprintf("%s:%v:%s", table, id, targetCol)
+
+	// Check TTL-aware cache
 	relationCacheMu.RLock()
-	if cached, ok := relationCache[cacheKey]; ok {
+	if entry, ok := relationCache[cacheKey]; ok && time.Since(entry.cachedAt) < relationCacheTTL {
+		m := entry.value
 		relationCacheMu.RUnlock()
-		if cached == nil {
+		if m == nil {
 			return nil, nil
 		}
-		val, _ := cached.Get(targetCol)
-		return cached, val
+		val, _ := m.Get(targetCol)
+		return m, val
 	}
 	relationCacheMu.RUnlock()
 
@@ -1594,25 +1649,25 @@ func FindRelation(table string, id any, displayCol ...string) (*Map, any) {
 
 		res := NewMap()
 		for i, c := range rowCols {
-			val := values[i]
-			if b, ok := val.([]byte); ok {
+			v := values[i]
+			if b, ok := v.([]byte); ok {
 				res.Set(c, string(b))
 			} else {
-				res.Set(c, val)
+				res.Set(c, v)
 			}
 		}
 
 		relationCacheMu.Lock()
-		relationCache[cacheKey] = res
+		relationCache[cacheKey] = relationCacheEntry{value: res, cachedAt: time.Now()}
 		relationCacheMu.Unlock()
 
 		val, _ := res.Get(targetCol)
 		return res, val
 	}
 
-	// Cache negative lookup so non-existent relations are not queried repeatedly
+	// Cache negative lookup with TTL so non-existent relations are not queried repeatedly
 	relationCacheMu.Lock()
-	relationCache[cacheKey] = nil
+	relationCache[cacheKey] = relationCacheEntry{value: nil, cachedAt: time.Now()}
 	relationCacheMu.Unlock()
 
 	return nil, nil
