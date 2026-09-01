@@ -404,18 +404,6 @@ func (g *Generator) autoRegisterRoute(tableName, modelName string) error {
 		return nil
 	}
 
-	routeSnippet := fmt.Sprintf(`
-		// %s CRUD Resource
-		protected.Route("/%s", func(r chi.Router) {
-			ctrl := controllers.New%sController()
-			r.Get("/", ctrl.Index)
-			r.Get("/all", ctrl.All)
-			r.Post("/", ctrl.Store)
-			r.Get("/{id}", ctrl.Show)
-			r.Put("/{id}", ctrl.Update)
-			r.Delete("/{id}", ctrl.Destroy)
-		})`, modelName, routePath, modelName)
-
 	// Target insertion inside protected group if available
 	protectedTarget := "protected.Use(middleware.AuthRequired)"
 	if idx := strings.Index(content, protectedTarget); idx != -1 {
