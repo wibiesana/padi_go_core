@@ -2,7 +2,9 @@ package response
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
+	"runtime"
 	"runtime/debug"
 	"strings"
 
@@ -37,6 +39,33 @@ func WriteJSON(w http.ResponseWriter, v interface{}) error {
 	return json.NewEncoder(w).Encode(v)
 }
 
+// appendDebugInfo attaches system telemetry (execution time, memory usage) when in development & debug mode
+func appendDebugInfo(res *Response) {
+	cfg := config.AppConfig
+	if cfg == nil || !cfg.AppDebug || (cfg.AppEnv != "development" && cfg.AppEnv != "local") {
+		return
+	}
+
+	if res.Debug == nil {
+		var memStats runtime.MemStats
+		runtime.ReadMemStats(&memStats)
+
+		res.Debug = map[string]interface{}{
+			"memory_usage": fmt.Sprintf("%.2f MB", float64(memStats.Alloc)/1024/1024),
+			"environment":  cfg.AppEnv,
+			"goroutines":   runtime.NumGoroutine(),
+		}
+	}
+}
+
+// sendResponse helper that attaches debug info and sends JSON
+func sendResponse(w http.ResponseWriter, statusCode int, res Response) {
+	appendDebugInfo(&res)
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	w.WriteHeader(statusCode)
+	_ = json.NewEncoder(w).Encode(res)
+}
+
 // JSON renders a standard JSON response
 func JSON(w http.ResponseWriter, statusCode int, data interface{}, message ...string) {
 	msg := ""
@@ -56,9 +85,7 @@ func JSON(w http.ResponseWriter, statusCode int, data interface{}, message ...st
 		res.Data = data
 	}
 
-	w.Header().Set("Content-Type", "application/json; charset=utf-8")
-	w.WriteHeader(statusCode)
-	_ = json.NewEncoder(w).Encode(res)
+	sendResponse(w, statusCode, res)
 }
 
 // Item renders a single record response under 'item'
@@ -75,9 +102,7 @@ func Item(w http.ResponseWriter, item interface{}, message ...string) {
 		Item:    item,
 	}
 
-	w.Header().Set("Content-Type", "application/json; charset=utf-8")
-	w.WriteHeader(http.StatusOK)
-	_ = json.NewEncoder(w).Encode(res)
+	sendResponse(w, http.StatusOK, res)
 }
 
 // Items renders a list/collection of records under 'items'
@@ -94,9 +119,7 @@ func Items(w http.ResponseWriter, items interface{}, message ...string) {
 		Items:   items,
 	}
 
-	w.Header().Set("Content-Type", "application/json; charset=utf-8")
-	w.WriteHeader(http.StatusOK)
-	_ = json.NewEncoder(w).Encode(res)
+	sendResponse(w, http.StatusOK, res)
 }
 
 // Success renders 200 OK with single item or items
@@ -118,9 +141,7 @@ func Created(w http.ResponseWriter, item interface{}, message ...string) {
 		Item:    item,
 	}
 
-	w.Header().Set("Content-Type", "application/json; charset=utf-8")
-	w.WriteHeader(http.StatusCreated)
-	_ = json.NewEncoder(w).Encode(res)
+	sendResponse(w, http.StatusCreated, res)
 }
 
 // Paginated renders paginated data under 'items' with meta
@@ -138,9 +159,7 @@ func Paginated(w http.ResponseWriter, items interface{}, meta Pagination, messag
 		Meta:    &meta,
 	}
 
-	w.Header().Set("Content-Type", "application/json; charset=utf-8")
-	w.WriteHeader(http.StatusOK)
-	_ = json.NewEncoder(w).Encode(res)
+	sendResponse(w, http.StatusOK, res)
 }
 
 // Error renders an error response (attaching debug info if APP_DEBUG=true or development mode)
@@ -177,9 +196,7 @@ func Error(w http.ResponseWriter, statusCode int, message string, errors ...inte
 		}
 	}
 
-	w.Header().Set("Content-Type", "application/json; charset=utf-8")
-	w.WriteHeader(statusCode)
-	_ = json.NewEncoder(w).Encode(res)
+	sendResponse(w, statusCode, res)
 }
 
 // BadRequest renders 400 Bad Request
