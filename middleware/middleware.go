@@ -20,14 +20,18 @@ import (
 type contextKey string
 
 const (
-	UserContextKey   contextKey = "padi_user"
-	UserIDContextKey contextKey = "padi_user_id"
+	UserContextKey             contextKey = "padi_user"
+	UserIDContextKey           contextKey = "padi_user_id"
+	RequestStartTimeContextKey contextKey = "padi_request_start_time"
 )
 
-// Logger logs each incoming HTTP request with latency
+// Logger logs each incoming HTTP request with latency and attaches start time to context
 func Logger(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		start := time.Now()
+		ctx := context.WithValue(r.Context(), RequestStartTimeContextKey, start)
+		r = r.WithContext(ctx)
+
 		ww := &responseWriterWrapper{ResponseWriter: w, statusCode: http.StatusOK}
 
 		next.ServeHTTP(ww, r)
