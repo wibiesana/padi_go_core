@@ -1,8 +1,10 @@
 package activerecord
 
 import (
+	"bytes"
 	"context"
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"reflect"
 	"regexp"
@@ -337,7 +339,7 @@ func FindWithContext[T Model](ctx context.Context, id interface{}, columns ...st
 
 // FindByPk retrieves record by primary key
 func FindByPk[T Model](id interface{}, columns ...string) (*T, error) {
-	return FindByPkWithContext[T](nil, id, columns...)
+	return FindByPkWithContext[T](context.TODO(), id, columns...)
 }
 
 // FindByPkWithContext retrieves record by primary key with context
@@ -364,7 +366,7 @@ func FindByPkWithContext[T Model](ctx context.Context, id interface{}, columns .
 
 // FindOne finds a single record by ID or conditions
 func FindOne[T Model](condition interface{}, columns ...string) (*T, error) {
-	return FindOneWithContext[T](nil, condition, columns...)
+	return FindOneWithContext[T](context.TODO(), condition, columns...)
 }
 
 // FindOneWithContext finds a single record by ID or conditions with context
@@ -434,7 +436,7 @@ func FindAll[T Model](condition ...interface{}) ([]T, error) {
 
 // FindOrFail retrieves a single record by primary key or returns 404 error
 func FindOrFail[T Model](id interface{}, columns ...string) (*T, error) {
-	return FindOrFailWithContext[T](nil, id, columns...)
+	return FindOrFailWithContext[T](context.TODO(), id, columns...)
 }
 
 // FindOrFailWithContext retrieves a single record by primary key with context
@@ -465,7 +467,7 @@ func FindBy[T Model](column string, val interface{}) (*T, error) {
 
 // All retrieves all records for the model
 func All[T Model](columns ...string) ([]T, error) {
-	return AllWithContext[T](nil, columns...)
+	return AllWithContext[T](context.TODO(), columns...)
 }
 
 // AllWithContext retrieves all records for the model with context
@@ -541,7 +543,7 @@ func Count[T Model](conditions ...map[string]interface{}) (int64, error) {
 
 // Paginate executes query pagination for model
 func Paginate[T Model](opts query.Options, searchColumns ...string) (response.Pagination, []T, error) {
-	return PaginateWithContext[T](nil, opts, searchColumns...)
+	return PaginateWithContext[T](context.TODO(), opts, searchColumns...)
 }
 
 // PaginateWithContext executes query pagination for model with context
@@ -1297,6 +1299,15 @@ func Query[T any](sqlStr string, args ...interface{}) ([]T, error) {
 
 // GetTableColumns inspects table column names cached with TTL
 func GetTableColumns(tableName string) ([]string, error) {
+	columnsCacheMu.RLock()
+	if entry, ok := columnsCache[tableName]; ok {
+		if time.Since(entry.cachedAt) < columnsCacheTTL {
+			columnsCacheMu.RUnlock()
+			return entry.columns, nil
+		}
+	}
+	columnsCacheMu.RUnlock()
+
 	db := database.GetDB()
 	driver := database.GetDriver()
 	var columns []string
@@ -1356,6 +1367,12 @@ func GetTableColumns(tableName string) ([]string, error) {
 		}
 	}
 
+	if len(columns) > 0 {
+		columnsCacheMu.Lock()
+		columnsCache[tableName] = columnCacheEntry{columns: columns, cachedAt: time.Now()}
+		columnsCacheMu.Unlock()
+	}
+
 	return columns, nil
 }
 
@@ -1379,8 +1396,86 @@ func FilterFillable(m Model, data map[string]interface{}) map[string]interface{}
 // HideFields is a placeholder for hiding sensitive fields during array transformations
 func HideFields(items interface{}) {}
 
+// Map represents an insertion-ordered key-value map for predictable, structured JSON serialization
+type Map struct {
+	keys   []string
+	values map[string]any
+}
+
+// NewMap creates an empty ordered Map
+func NewMap() *Map {
+	return &Map{
+		keys:   make([]string, 0, 16),
+		values: make(map[string]any, 16),
+	}
+}
+
+// Set sets a key-value pair preserving insertion order
+func (m *Map) Set(key string, val any) *Map {
+	if m == nil {
+		return m
+	}
+	if _, exists := m.values[key]; !exists {
+		m.keys = append(m.keys, key)
+	}
+	m.values[key] = val
+	return m
+}
+
+// Get retrieves a value by key
+func (m *Map) Get(key string) (any, bool) {
+	if m == nil || m.values == nil {
+		return nil, false
+	}
+	val, ok := m.values[key]
+	return val, ok
+}
+
+// Keys returns all keys in insertion order
+func (m *Map) Keys() []string {
+	if m == nil {
+		return nil
+	}
+	return m.keys
+}
+
+// ToMap converts the ordered Map to a standard Go map[string]any
+func (m *Map) ToMap() map[string]any {
+	if m == nil {
+		return nil
+	}
+	return m.values
+}
+
+// MarshalJSON serializes the map preserving the exact insertion order
+func (m *Map) MarshalJSON() ([]byte, error) {
+	if m == nil {
+		return []byte("null"), nil
+	}
+	var buf bytes.Buffer
+	buf.WriteByte('{')
+	for i, k := range m.keys {
+		if i > 0 {
+			buf.WriteByte(',')
+		}
+		kB, err := json.Marshal(k)
+		if err != nil {
+			return nil, err
+		}
+		buf.Write(kB)
+		buf.WriteByte(':')
+		vB, err := json.Marshal(m.values[k])
+		if err != nil {
+			return nil, err
+		}
+		buf.Write(vB)
+	}
+	buf.WriteByte('}')
+	return buf.Bytes(), nil
+}
+
 var (
-	relationCache   = make(map[string]map[string]any)
+	relationCache   = make(map[string]*Map)
 	relationCacheMu sync.RWMutex
 )
 
@@ -1388,11 +1483,11 @@ var (
 func ClearRelationCache() {
 	relationCacheMu.Lock()
 	defer relationCacheMu.Unlock()
-	relationCache = make(map[string]map[string]any)
+	relationCache = make(map[string]*Map)
 }
 
 // FindRelation fetches a related record map and its primary display field with in-memory caching
-func FindRelation(table string, id any, displayCol ...string) (map[string]any, any) {
+func FindRelation(table string, id any, displayCol ...string) (*Map, any) {
 	if isNilOrZero(id) {
 		return nil, nil
 	}
@@ -1405,8 +1500,9 @@ func FindRelation(table string, id any, displayCol ...string) (map[string]any, a
 	cacheKey := fmt.Sprintf("%s:%v:%s", table, id, targetCol)
 	relationCacheMu.RLock()
 	if cached, ok := relationCache[cacheKey]; ok {
+		val, _ := cached.Get(targetCol)
 		relationCacheMu.RUnlock()
-		return cached, cached[targetCol]
+		return cached, val
 	}
 	relationCacheMu.RUnlock()
 
@@ -1479,13 +1575,13 @@ func FindRelation(table string, id any, displayCol ...string) (map[string]any, a
 		}
 		rows.Close()
 
-		res := make(map[string]any)
+		res := NewMap()
 		for i, c := range rowCols {
 			val := values[i]
 			if b, ok := val.([]byte); ok {
-				res[c] = string(b)
+				res.Set(c, string(b))
 			} else {
-				res[c] = val
+				res.Set(c, val)
 			}
 		}
 
@@ -1493,7 +1589,8 @@ func FindRelation(table string, id any, displayCol ...string) (map[string]any, a
 		relationCache[cacheKey] = res
 		relationCacheMu.Unlock()
 
-		return res, res[targetCol]
+		val, _ := res.Get(targetCol)
+		return res, val
 	}
 
 	return nil, nil
