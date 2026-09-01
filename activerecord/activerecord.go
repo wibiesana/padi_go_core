@@ -1309,41 +1309,38 @@ func GetTableColumns(tableName string) ([]string, error) {
 	columnsCacheMu.RUnlock()
 
 	db := database.GetDB()
+	if db == nil {
+		return nil, fmt.Errorf("database connection not initialized")
+	}
 	driver := database.GetDriver()
 	var columns []string
 
 	if driver == "sqlite" {
 		rows, err := db.Query(fmt.Sprintf("PRAGMA table_info('%s')", tableName))
-		if err != nil {
-			return nil, err
-		}
-		defer rows.Close()
-		for rows.Next() {
-			var cid, notnull, pk int
-			var name, typeStr string
-			var dflt *string
-			if err := rows.Scan(&cid, &name, &typeStr, &notnull, &dflt, &pk); err == nil {
-				columns = append(columns, name)
+		if err == nil {
+			defer rows.Close()
+			for rows.Next() {
+				var cid, notnull, pk int
+				var name, typeStr string
+				var dflt *string
+				if err := rows.Scan(&cid, &name, &typeStr, &notnull, &dflt, &pk); err == nil {
+					columns = append(columns, name)
+				}
 			}
-		}
-		if err := rows.Err(); err != nil {
-			return nil, err
+			_ = rows.Err()
 		}
 	} else if driver == "mysql" {
 		rows, err := db.Query(fmt.Sprintf("DESCRIBE `%s`", tableName))
-		if err != nil {
-			return nil, err
-		}
-		defer rows.Close()
-		for rows.Next() {
-			var field, typeStr, null, key, extra string
-			var def *string
-			if err := rows.Scan(&field, &typeStr, &null, &key, &def, &extra); err == nil {
-				columns = append(columns, field)
+		if err == nil {
+			defer rows.Close()
+			for rows.Next() {
+				var field, typeStr, null, key, extra string
+				var def *string
+				if err := rows.Scan(&field, &typeStr, &null, &key, &def, &extra); err == nil {
+					columns = append(columns, field)
+				}
 			}
-		}
-		if err := rows.Err(); err != nil {
-			return nil, err
+			_ = rows.Err()
 		}
 	} else {
 		// Postgres
@@ -1352,26 +1349,21 @@ func GetTableColumns(tableName string) ([]string, error) {
 			FROM information_schema.columns 
 			WHERE table_name = $1 
 			ORDER BY ordinal_position`, tableName)
-		if err != nil {
-			return nil, err
-		}
-		defer rows.Close()
-		for rows.Next() {
-			var colName string
-			if err := rows.Scan(&colName); err == nil {
-				columns = append(columns, colName)
+		if err == nil {
+			defer rows.Close()
+			for rows.Next() {
+				var colName string
+				if err := rows.Scan(&colName); err == nil {
+					columns = append(columns, colName)
+				}
 			}
-		}
-		if err := rows.Err(); err != nil {
-			return nil, err
+			_ = rows.Err()
 		}
 	}
 
-	if len(columns) > 0 {
-		columnsCacheMu.Lock()
-		columnsCache[tableName] = columnCacheEntry{columns: columns, cachedAt: time.Now()}
-		columnsCacheMu.Unlock()
-	}
+	columnsCacheMu.Lock()
+	columnsCache[tableName] = columnCacheEntry{columns: columns, cachedAt: time.Now()}
+	columnsCacheMu.Unlock()
 
 	return columns, nil
 }
@@ -1447,11 +1439,12 @@ func (m *Map) ToMap() map[string]any {
 	return m.values
 }
 
-// MarshalJSON serializes the map preserving the exact insertion order
+// MarshalJSON implements json.Marshaler ensuring exact insertion order in JSON output
 func (m *Map) MarshalJSON() ([]byte, error) {
-	if m == nil {
-		return []byte("null"), nil
+	if m == nil || len(m.keys) == 0 {
+		return []byte("{}"), nil
 	}
+
 	var buf bytes.Buffer
 	buf.WriteByte('{')
 	for i, k := range m.keys {
@@ -1500,8 +1493,11 @@ func FindRelation(table string, id any, displayCol ...string) (*Map, any) {
 	cacheKey := fmt.Sprintf("%s:%v:%s", table, id, targetCol)
 	relationCacheMu.RLock()
 	if cached, ok := relationCache[cacheKey]; ok {
-		val, _ := cached.Get(targetCol)
 		relationCacheMu.RUnlock()
+		if cached == nil {
+			return nil, nil
+		}
+		val, _ := cached.Get(targetCol)
 		return cached, val
 	}
 	relationCacheMu.RUnlock()
@@ -1512,12 +1508,33 @@ func FindRelation(table string, id any, displayCol ...string) (*Map, any) {
 	}
 	driver := database.GetDriver()
 
-	// Try with provided table name, and fallback to singular/plural
-	tablesToTry := []string{table}
+	// Build candidate tables: provided, singular, plural, and compound fallbacks (e.g. graduation_semesters -> semesters)
+	tableSet := make(map[string]bool)
+	var tablesToTry []string
+	addTableCandidate := func(t string) {
+		if t != "" && !tableSet[t] {
+			tableSet[t] = true
+			tablesToTry = append(tablesToTry, t)
+		}
+	}
+
+	addTableCandidate(table)
 	if strings.HasSuffix(table, "s") {
-		tablesToTry = append(tablesToTry, strings.TrimSuffix(table, "s"))
+		addTableCandidate(strings.TrimSuffix(table, "s"))
 	} else {
-		tablesToTry = append(tablesToTry, table+"s")
+		addTableCandidate(table + "s")
+	}
+
+	// If table contains underscore (e.g. "graduation_semesters" or "graduation_semester"), also try last word (e.g. "semesters", "semester")
+	if strings.Contains(table, "_") {
+		parts := strings.Split(table, "_")
+		lastWord := parts[len(parts)-1]
+		addTableCandidate(lastWord)
+		if strings.HasSuffix(lastWord, "s") {
+			addTableCandidate(strings.TrimSuffix(lastWord, "s"))
+		} else {
+			addTableCandidate(lastWord + "s")
+		}
 	}
 
 	for _, tbl := range tablesToTry {
@@ -1592,6 +1609,11 @@ func FindRelation(table string, id any, displayCol ...string) (*Map, any) {
 		val, _ := res.Get(targetCol)
 		return res, val
 	}
+
+	// Cache negative lookup so non-existent relations are not queried repeatedly
+	relationCacheMu.Lock()
+	relationCache[cacheKey] = nil
+	relationCacheMu.Unlock()
 
 	return nil, nil
 }
