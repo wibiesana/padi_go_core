@@ -419,7 +419,43 @@ func (g *Generator) autoRegisterRoute(tableName, modelName string) error {
 	// Target insertion inside protected group if available
 	protectedTarget := "protected.Use(middleware.AuthRequired)"
 	if idx := strings.Index(content, protectedTarget); idx != -1 {
+		routeSnippet := fmt.Sprintf(`
+		// %s CRUD Resource
+		protected.Route("/%s", func(r chi.Router) {
+			ctrl := controllers.New%sController()
+			r.Get("/", ctrl.Index)
+			r.Get("/all", ctrl.All)
+			r.Post("/", ctrl.Store)
+			r.Get("/{id}", ctrl.Show)
+			r.Put("/{id}", ctrl.Update)
+			r.Delete("/{id}", ctrl.Destroy)
+		})`, modelName, routePath, modelName)
+
 		insertPos := idx + len(protectedTarget)
+		newContent := content[:insertPos] + routeSnippet + content[insertPos:]
+		if err := os.WriteFile(routesFile, []byte(newContent), 0644); err != nil {
+			return err
+		}
+		fmt.Printf("✓ Automatically registered protected route [/%s] in %s\n", routePath, routesFile)
+		return nil
+	}
+
+	// Secondary Target: Look for r.Mux.Group
+	muxGroupTarget := "r.Mux.Group(func(protected chi.Router) {"
+	if idx := strings.Index(content, muxGroupTarget); idx != -1 {
+		routeSnippet := fmt.Sprintf(`
+		// %s CRUD Resource
+		protected.Route("/%s", func(r chi.Router) {
+			ctrl := controllers.New%sController()
+			r.Get("/", ctrl.Index)
+			r.Get("/all", ctrl.All)
+			r.Post("/", ctrl.Store)
+			r.Get("/{id}", ctrl.Show)
+			r.Put("/{id}", ctrl.Update)
+			r.Delete("/{id}", ctrl.Destroy)
+		})`, modelName, routePath, modelName)
+
+		insertPos := idx + len(muxGroupTarget)
 		newContent := content[:insertPos] + routeSnippet + content[insertPos:]
 		if err := os.WriteFile(routesFile, []byte(newContent), 0644); err != nil {
 			return err
