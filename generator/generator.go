@@ -974,6 +974,19 @@ func (g *Generator) generateAPICollection(tableName, modelName string, columns [
 				"response": []interface{}{},
 			},
 			{
+				"name": fmt.Sprintf("Get All %ss (No Pagination)", modelName),
+				"request": map[string]interface{}{
+					"method": "GET",
+					"header": []interface{}{},
+					"url": map[string]interface{}{
+						"raw":  fmt.Sprintf("{{base_url}}/%s/all", routePrefix),
+						"host": []string{"{{base_url}}"},
+						"path": []string{routePrefix, "all"},
+					},
+				},
+				"response": []interface{}{},
+			},
+			{
 				"name": fmt.Sprintf("Get Single %s by ID", modelName),
 				"request": map[string]interface{}{
 					"method": "GET",
