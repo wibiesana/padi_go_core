@@ -3,6 +3,10 @@ package response
 import (
 	"encoding/json"
 	"net/http"
+	"runtime/debug"
+	"strings"
+
+	"github.com/wibiesana/padi_go_core/config"
 )
 
 // Response standard Padi API response structure
@@ -139,7 +143,7 @@ func Paginated(w http.ResponseWriter, items interface{}, meta Pagination, messag
 	_ = json.NewEncoder(w).Encode(res)
 }
 
-// Error renders an error response
+// Error renders an error response (attaching debug info if APP_DEBUG=true or development mode)
 func Error(w http.ResponseWriter, statusCode int, message string, errors ...interface{}) {
 	var errDetails interface{}
 	if len(errors) > 0 {
@@ -151,6 +155,26 @@ func Error(w http.ResponseWriter, statusCode int, message string, errors ...inte
 		Success: false,
 		Message: message,
 		Errors:  errDetails,
+	}
+
+	// Auto-inject debug info on 500 errors if in debug / development mode
+	if statusCode >= 500 {
+		cfg := config.AppConfig
+		if cfg != nil && (cfg.AppDebug || cfg.AppEnv == "development" || cfg.AppEnv == "local") {
+			stackBytes := debug.Stack()
+			stackLines := strings.Split(strings.ReplaceAll(string(stackBytes), "\r\n", "\n"), "\n")
+			var filtered []string
+			for _, l := range stackLines {
+				if t := strings.TrimSpace(l); t != "" {
+					filtered = append(filtered, t)
+				}
+			}
+			res.Debug = map[string]interface{}{
+				"status": statusCode,
+				"error":  message,
+				"trace":  filtered,
+			}
+		}
 	}
 
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
@@ -199,10 +223,10 @@ func UnprocessableEntity(w http.ResponseWriter, errors interface{}, message ...s
 	Error(w, http.StatusUnprocessableEntity, msg, errors)
 }
 
-// InternalServerError renders 500 Server Error
+// InternalServerError renders 500 Server Error with optional error detail
 func InternalServerError(w http.ResponseWriter, message ...string) {
 	msg := "Internal server error occurred"
-	if len(message) > 0 {
+	if len(message) > 0 && message[0] != "" {
 		msg = message[0]
 	}
 	Error(w, http.StatusInternalServerError, msg)
