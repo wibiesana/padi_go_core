@@ -40,10 +40,16 @@ func WriteJSON(w http.ResponseWriter, v interface{}) error {
 	return json.NewEncoder(w).Encode(v)
 }
 
-// appendDebugInfo attaches system telemetry (execution time, memory usage, etc.) when in development & debug mode
+// appendDebugInfo attaches system telemetry (execution time, memory usage, etc.) when APP_DEBUG=true or in development mode
 func appendDebugInfo(w http.ResponseWriter, res *Response) {
 	cfg := config.AppConfig
-	if cfg == nil || !cfg.AppDebug || (cfg.AppEnv != "development" && cfg.AppEnv != "local") {
+	if cfg == nil {
+		cfg = config.Load()
+	}
+
+	// Always show debug if APP_DEBUG=true OR APP_ENV=development/local
+	isDebug := cfg != nil && (cfg.AppDebug || cfg.AppEnv == "development" || cfg.AppEnv == "local")
+	if !isDebug {
 		return
 	}
 
