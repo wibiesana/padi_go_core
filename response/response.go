@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/wibiesana/padi_go_core/config"
+	"github.com/wibiesana/padi_go_core/database"
 )
 
 // Response standard Padi API response structure
@@ -71,6 +72,28 @@ func appendDebugInfo(w http.ResponseWriter, res *Response) {
 		"goroutines":     runtime.NumGoroutine(),
 		"environment":    cfg.AppEnv,
 	}
+
+	// Query telemetry
+	type queryTrackerProvider interface {
+		GetQueryTracker() *database.QueryTracker
+	}
+
+	var queryList []interface{}
+	if qp, ok := w.(queryTrackerProvider); ok && qp != nil {
+		if tr := qp.GetQueryTracker(); tr != nil {
+			qLogs := tr.Queries()
+			queryList = make([]interface{}, len(qLogs))
+			for i, ql := range qLogs {
+				queryList[i] = ql
+			}
+		}
+	}
+	if queryList == nil {
+		queryList = []interface{}{}
+	}
+
+	debugInfo["query_count"] = len(queryList)
+	debugInfo["queries"] = queryList
 
 	if res.Debug != nil {
 		if existing, ok := res.Debug.(map[string]interface{}); ok {

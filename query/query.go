@@ -1,6 +1,7 @@
 package query
 
 import (
+	"context"
 	"database/sql"
 	"fmt"
 	"math"
@@ -61,6 +62,7 @@ func ParseOptions(r *http.Request) Options {
 
 // Query is the fluent SQL Query Builder (Zero-bloat, Native & Parameterized)
 type Query struct {
+	ctx       context.Context
 	db        *sql.DB
 	driver    string
 	table     string
@@ -95,6 +97,12 @@ func New(tableName string, db ...*sql.DB) *Query {
 		limitVal:  -1,
 		autoIlike: true,
 	}
+}
+
+// WithContext attaches a context for telemetry and tracing
+func (q *Query) WithContext(ctx context.Context) *Query {
+	q.ctx = ctx
+	return q
 }
 
 // Find starts a new query builder (static constructor matching PHP Query::find)
@@ -789,8 +797,10 @@ func (q *Query) Count(col ...string) (int64, error) {
 	clone.orderBys = nil
 
 	querySQL, args := clone.BuildSQL()
+	start := time.Now()
 	var total int64
 	err := q.db.QueryRow(querySQL, args...).Scan(&total)
+	database.TrackQuery(q.ctx, querySQL, args, time.Since(start))
 	return total, err
 }
 
@@ -802,8 +812,10 @@ func (q *Query) Exists() (bool, error) {
 	clone.offsetVal = 0
 
 	querySQL, args := clone.BuildSQL()
+	start := time.Now()
 	var val int
 	err := q.db.QueryRow(querySQL, args...).Scan(&val)
+	database.TrackQuery(q.ctx, querySQL, args, time.Since(start))
 	if err == sql.ErrNoRows {
 		return false, nil
 	}
@@ -822,8 +834,10 @@ func (q *Query) Sum(column string) (float64, error) {
 	clone.orderBys = nil
 
 	querySQL, args := clone.BuildSQL()
+	start := time.Now()
 	var total sql.NullFloat64
 	err := q.db.QueryRow(querySQL, args...).Scan(&total)
+	database.TrackQuery(q.ctx, querySQL, args, time.Since(start))
 	if err != nil {
 		return 0, err
 	}
@@ -839,8 +853,10 @@ func (q *Query) Average(column string) (float64, error) {
 	clone.orderBys = nil
 
 	querySQL, args := clone.BuildSQL()
+	start := time.Now()
 	var avg sql.NullFloat64
 	err := q.db.QueryRow(querySQL, args...).Scan(&avg)
+	database.TrackQuery(q.ctx, querySQL, args, time.Since(start))
 	if err != nil {
 		return 0, err
 	}
@@ -861,8 +877,10 @@ func (q *Query) Min(column string) (interface{}, error) {
 	clone.orderBys = nil
 
 	querySQL, args := clone.BuildSQL()
+	start := time.Now()
 	var val interface{}
 	err := q.db.QueryRow(querySQL, args...).Scan(&val)
+	database.TrackQuery(q.ctx, querySQL, args, time.Since(start))
 	return val, err
 }
 
@@ -875,8 +893,10 @@ func (q *Query) Max(column string) (interface{}, error) {
 	clone.orderBys = nil
 
 	querySQL, args := clone.BuildSQL()
+	start := time.Now()
 	var val interface{}
 	err := q.db.QueryRow(querySQL, args...).Scan(&val)
+	database.TrackQuery(q.ctx, querySQL, args, time.Since(start))
 	return val, err
 }
 
@@ -884,14 +904,19 @@ func (q *Query) Max(column string) (interface{}, error) {
 func (q *Query) Scalar(dest interface{}) error {
 	q.Limit(1)
 	querySQL, args := q.BuildSQL()
-	return q.db.QueryRow(querySQL, args...).Scan(dest)
+	start := time.Now()
+	err := q.db.QueryRow(querySQL, args...).Scan(dest)
+	database.TrackQuery(q.ctx, querySQL, args, time.Since(start))
+	return err
 }
 
 // Column executes query and returns a slice of values for a single column
 func (q *Query) Column(columnName string) ([]interface{}, error) {
 	q.Select(columnName)
 	querySQL, args := q.BuildSQL()
+	start := time.Now()
 	rows, err := q.db.Query(querySQL, args...)
+	database.TrackQuery(q.ctx, querySQL, args, time.Since(start))
 	if err != nil {
 		return nil, err
 	}
@@ -913,7 +938,9 @@ func (q *Query) First(dest interface{}) error {
 	q.Limit(1)
 	querySQL, args := q.BuildSQL()
 
+	start := time.Now()
 	rows, err := q.db.Query(querySQL, args...)
+	database.TrackQuery(q.ctx, querySQL, args, time.Since(start))
 	if err != nil {
 		return err
 	}
@@ -934,7 +961,9 @@ func (q *Query) One(dest interface{}) error {
 // All fetches all matching rows and maps into a slice pointer
 func (q *Query) All(destSlice interface{}) error {
 	querySQL, args := q.BuildSQL()
+	start := time.Now()
 	rows, err := q.db.Query(querySQL, args...)
+	database.TrackQuery(q.ctx, querySQL, args, time.Since(start))
 	if err != nil {
 		return err
 	}
@@ -1032,12 +1061,16 @@ func (q *Query) Insert(data map[string]interface{}) (int64, error) {
 	sqlStr := fmt.Sprintf("INSERT INTO %s (%s) VALUES (%s)", q.table, strings.Join(columns, ", "), strings.Join(placeholders, ", "))
 	if q.driver == "postgres" {
 		sqlStr += " RETURNING id"
+		start := time.Now()
 		var id int64
 		err := q.db.QueryRow(sqlStr, args...).Scan(&id)
+		database.TrackQuery(q.ctx, sqlStr, args, time.Since(start))
 		return id, err
 	}
 
+	start := time.Now()
 	res, err := q.db.Exec(sqlStr, args...)
+	database.TrackQuery(q.ctx, sqlStr, args, time.Since(start))
 	if err != nil {
 		return 0, err
 	}
@@ -1080,7 +1113,9 @@ func (q *Query) Update(data map[string]interface{}) (int64, error) {
 		args = append(args, q.args...)
 	}
 
+	start := time.Now()
 	res, err := q.db.Exec(sqlStr.String(), args...)
+	database.TrackQuery(q.ctx, sqlStr.String(), args, time.Since(start))
 	if err != nil {
 		return 0, err
 	}
@@ -1096,7 +1131,9 @@ func (q *Query) Delete() (int64, error) {
 		sqlStr.WriteString(" WHERE ")
 		sqlStr.WriteString(strings.Join(q.wheres, " "))
 	}
+	start := time.Now()
 	res, err := q.db.Exec(sqlStr.String(), q.args...)
+	database.TrackQuery(q.ctx, sqlStr.String(), q.args, time.Since(start))
 	if err != nil {
 		return 0, err
 	}

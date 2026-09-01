@@ -12,6 +12,7 @@ import (
 
 	"github.com/wibiesana/padi_go_core/auth"
 	"github.com/wibiesana/padi_go_core/config"
+	"github.com/wibiesana/padi_go_core/database"
 	"github.com/wibiesana/padi_go_core/response"
 
 	"github.com/go-chi/cors"
@@ -25,14 +26,28 @@ const (
 	RequestStartTimeContextKey contextKey = "padi_request_start_time"
 )
 
-// Logger logs each incoming HTTP request with latency and attaches start time to context
+// Logger logs each incoming HTTP request with latency and attaches start time and QueryTracker to context
 func Logger(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		start := time.Now()
-		ctx := context.WithValue(r.Context(), RequestStartTimeContextKey, start)
+		var tracker *database.QueryTracker
+		cfg := config.AppConfig
+		if cfg != nil && (cfg.AppDebug || cfg.AppEnv == "development" || cfg.AppEnv == "local") {
+			tracker = database.NewQueryTracker()
+		}
+
+		ctx := r.Context()
+		if tracker != nil {
+			ctx = context.WithValue(ctx, database.QueryTrackerKey, tracker)
+		}
+		ctx = context.WithValue(ctx, RequestStartTimeContextKey, start)
 		r = r.WithContext(ctx)
 
-		ww := &responseWriterWrapper{ResponseWriter: w, statusCode: http.StatusOK}
+		ww := &responseWriterWrapper{
+			ResponseWriter: w,
+			statusCode:     http.StatusOK,
+			tracker:        tracker,
+		}
 
 		next.ServeHTTP(ww, r)
 
@@ -187,9 +202,14 @@ func RateLimit(limit int, windowSeconds int) func(http.Handler) http.Handler {
 type responseWriterWrapper struct {
 	http.ResponseWriter
 	statusCode int
+	tracker    *database.QueryTracker
 }
 
 func (rw *responseWriterWrapper) WriteHeader(code int) {
 	rw.statusCode = code
 	rw.ResponseWriter.WriteHeader(code)
+}
+
+func (rw *responseWriterWrapper) GetQueryTracker() *database.QueryTracker {
+	return rw.tracker
 }

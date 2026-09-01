@@ -326,17 +326,17 @@ func GetPkConditions(m Model, id interface{}) (map[string]interface{}, error) {
 }
 
 // Find retrieves a single record by primary key (id)
-func Find[T Model](id interface{}) (*T, error) {
-	return FindByPk[T](id)
+func Find[T Model](id interface{}, contexts ...context.Context) (*T, error) {
+	return FindByPk[T](id, contexts...)
 }
 
 // FindByPk retrieves record by primary key
-func FindByPk[T Model](id interface{}, columns ...string) (*T, error) {
+func FindByPk[T Model](id interface{}, contexts ...context.Context) (*T, error) {
 	var item T
 	pkName := GetPrimaryKeyName(item)
 	q := query.New(item.TableName())
-	if len(columns) > 0 {
-		q.Select(columns...)
+	if len(contexts) > 0 && contexts[0] != nil {
+		q.WithContext(contexts[0])
 	}
 
 	err := q.Where(pkName, id).First(&item)
@@ -350,11 +350,11 @@ func FindByPk[T Model](id interface{}, columns ...string) (*T, error) {
 }
 
 // FindOne finds a single record by ID or conditions
-func FindOne[T Model](condition interface{}, columns ...string) (*T, error) {
+func FindOne[T Model](condition interface{}, contexts ...context.Context) (*T, error) {
 	var item T
 	q := query.New(item.TableName())
-	if len(columns) > 0 {
-		q.Select(columns...)
+	if len(contexts) > 0 && contexts[0] != nil {
+		q.WithContext(contexts[0])
 	}
 
 	if condMap, ok := condition.(map[string]interface{}); ok {
@@ -371,7 +371,7 @@ func FindOne[T Model](condition interface{}, columns ...string) (*T, error) {
 		return &item, nil
 	}
 
-	return FindByPk[T](condition, columns...)
+	return FindByPk[T](condition, contexts...)
 }
 
 // FindAll finds multiple records by primary key(s) or condition map
@@ -412,8 +412,8 @@ func FindAll[T Model](condition ...interface{}) ([]T, error) {
 }
 
 // FindOrFail retrieves a single record by primary key or returns 404 error
-func FindOrFail[T Model](id interface{}, columns ...string) (*T, error) {
-	item, err := FindByPk[T](id, columns...)
+func FindOrFail[T Model](id interface{}, contexts ...context.Context) (*T, error) {
+	item, err := FindByPk[T](id, contexts...)
 	if err != nil {
 		return nil, err
 	}
@@ -438,12 +438,12 @@ func FindBy[T Model](column string, val interface{}) (*T, error) {
 }
 
 // All retrieves all records for the model
-func All[T Model](columns ...string) ([]T, error) {
+func All[T Model](contexts ...context.Context) ([]T, error) {
 	var zero T
 	var records []T
 	q := query.New(zero.TableName())
-	if len(columns) > 0 {
-		q.Select(columns...)
+	if len(contexts) > 0 && contexts[0] != nil {
+		q.WithContext(contexts[0])
 	}
 	if ord, ok := any(zero).(DefaultOrderer); ok {
 		if d := ord.DefaultOrder(); d != "" {
@@ -468,8 +468,8 @@ func All[T Model](columns ...string) ([]T, error) {
 }
 
 // Get retrieves all records with eager-loading if configured
-func Get[T Model](columns ...string) ([]T, error) {
-	return All[T](columns...)
+func Get[T Model](contexts ...context.Context) ([]T, error) {
+	return All[T](contexts...)
 }
 
 // Where starts a query builder for model
@@ -501,10 +501,13 @@ func Count[T Model](conditions ...map[string]interface{}) (int64, error) {
 }
 
 // Paginate executes query pagination for model
-func Paginate[T Model](opts query.Options, searchColumns ...string) (response.Pagination, []T, error) {
+func Paginate[T Model](opts query.Options, searchColumns []string, contexts ...context.Context) (response.Pagination, []T, error) {
 	var zero T
 	var records []T
 	q := query.New(zero.TableName())
+	if len(contexts) > 0 && contexts[0] != nil {
+		q.WithContext(contexts[0])
+	}
 
 	meta, err := q.Paginate(opts, searchColumns, &records)
 	if err != nil {
@@ -859,7 +862,11 @@ func Save(m any, contexts ...context.Context) error {
 		args = append(args, idVal)
 
 		sqlStr := fmt.Sprintf("UPDATE %s SET %s WHERE %s = %s", tableName, strings.Join(setClauses, ", "), pkName, idPlaceholder)
+		start := time.Now()
 		_, err := db.Exec(sqlStr, args...)
+		if len(contexts) > 0 && contexts[0] != nil {
+			database.TrackQuery(contexts[0], sqlStr, args, time.Since(start))
+		}
 		if err != nil {
 			return err
 		}
@@ -963,8 +970,12 @@ func Save(m any, contexts ...context.Context) error {
 
 	if driver == "postgres" {
 		sqlStr += fmt.Sprintf(" RETURNING %s", pkName)
+		start := time.Now()
 		var newID int64
 		err := db.QueryRow(sqlStr, args...).Scan(&newID)
+		if len(contexts) > 0 && contexts[0] != nil {
+			database.TrackQuery(contexts[0], sqlStr, args, time.Since(start))
+		}
 		if err == nil {
 			setStructID(val, newID)
 			if hook, ok := m.(AfterSaver); ok {
@@ -974,7 +985,11 @@ func Save(m any, contexts ...context.Context) error {
 		return err
 	}
 
+	start := time.Now()
 	res, err := db.Exec(sqlStr, args...)
+	if len(contexts) > 0 && contexts[0] != nil {
+		database.TrackQuery(contexts[0], sqlStr, args, time.Since(start))
+	}
 	if err != nil {
 		return err
 	}
@@ -993,7 +1008,7 @@ func Save(m any, contexts ...context.Context) error {
 }
 
 // DeleteModel removes the record from database with BeforeDelete & AfterDelete hooks
-func DeleteModel(m any) error {
+func DeleteModel(m any, contexts ...context.Context) error {
 	db := database.GetDB()
 	driver := database.GetDriver()
 
@@ -1026,7 +1041,11 @@ func DeleteModel(m any) error {
 	}
 
 	sqlStr := fmt.Sprintf("DELETE FROM %s WHERE %s = %s", tableName, pkName, ph)
+	start := time.Now()
 	_, err := db.Exec(sqlStr, idVal)
+	if len(contexts) > 0 && contexts[0] != nil {
+		database.TrackQuery(contexts[0], sqlStr, []interface{}{idVal}, time.Since(start))
+	}
 	if err != nil {
 		return err
 	}
@@ -1039,7 +1058,7 @@ func DeleteModel(m any) error {
 }
 
 // SoftDelete sets deleted_at timestamp if table supports soft delete
-func SoftDelete(m any) error {
+func SoftDelete(m any, contexts ...context.Context) error {
 	db := database.GetDB()
 	driver := database.GetDriver()
 
@@ -1075,7 +1094,11 @@ func SoftDelete(m any) error {
 	}
 
 	sqlStr := fmt.Sprintf("UPDATE %s SET deleted_at = %s WHERE %s = %s", tableName, ph1, pkName, ph2)
+	start := time.Now()
 	_, err := db.Exec(sqlStr, now, idVal)
+	if len(contexts) > 0 && contexts[0] != nil {
+		database.TrackQuery(contexts[0], sqlStr, []interface{}{now, idVal}, time.Since(start))
+	}
 	if err != nil {
 		return err
 	}

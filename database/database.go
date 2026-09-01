@@ -23,6 +23,71 @@ var (
 	mu     sync.RWMutex
 )
 
+// QueryLog represents an executed SQL query with telemetry
+type QueryLog struct {
+	Query      string        `json:"query"`
+	Bindings   []interface{} `json:"bindings,omitempty"`
+	Time       string        `json:"time"`
+	DurationMs float64       `json:"duration_ms"`
+}
+
+type trackerContextKey string
+
+const QueryTrackerKey trackerContextKey = "padi_query_tracker"
+
+// QueryTracker collects executed SQL queries during a request lifecycle
+type QueryTracker struct {
+	mu      sync.Mutex
+	queries []QueryLog
+}
+
+// NewQueryTracker creates a new query collector
+func NewQueryTracker() *QueryTracker {
+	return &QueryTracker{
+		queries: make([]QueryLog, 0),
+	}
+}
+
+// Add appends an executed query to the tracker
+func (t *QueryTracker) Add(queryStr string, bindings []interface{}, duration time.Duration) {
+	if t == nil {
+		return
+	}
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	ms := float64(duration.Microseconds()) / 1000.0
+	t.queries = append(t.queries, QueryLog{
+		Query:      queryStr,
+		Bindings:   bindings,
+		Time:       fmt.Sprintf("%.2f ms", ms),
+		DurationMs: ms,
+	})
+}
+
+// Queries returns all recorded query logs
+func (t *QueryTracker) Queries() []QueryLog {
+	if t == nil {
+		return nil
+	}
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	res := make([]QueryLog, len(t.queries))
+	copy(res, t.queries)
+	return res
+}
+
+// TrackQuery records a query into the context's QueryTracker if available
+func TrackQuery(ctx interface{}, sqlStr string, args []interface{}, duration time.Duration) {
+	if ctx == nil {
+		return
+	}
+	if c, ok := ctx.(interface{ Value(key any) any }); ok {
+		if t, ok := c.Value(QueryTrackerKey).(*QueryTracker); ok && t != nil {
+			t.Add(sqlStr, args, duration)
+		}
+	}
+}
+
 // Connect initializes the primary database connection using native database/sql
 func Connect(cfg *config.Config) (*sql.DB, error) {
 	mu.Lock()

@@ -75,7 +75,7 @@ func TestActiveRecord(t *testing.T) {
 	}
 
 	opts := query.Options{Page: 1, PerPage: 10}
-	meta, list, err := activerecord.Paginate[TestArticle](opts, "title")
+	meta, list, err := activerecord.Paginate[TestArticle](opts, []string{"title"})
 	if err != nil || len(list) != 1 || meta.Total != 1 {
 		t.Fatalf("paginate failed")
 	}

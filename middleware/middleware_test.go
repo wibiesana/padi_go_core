@@ -1,13 +1,17 @@
 package middleware_test
 
 import (
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/wibiesana/padi_go_core/auth"
 	"github.com/wibiesana/padi_go_core/config"
+	"github.com/wibiesana/padi_go_core/database"
 	"github.com/wibiesana/padi_go_core/middleware"
+	"github.com/wibiesana/padi_go_core/response"
 )
 
 func TestMiddlewareStack(t *testing.T) {
@@ -21,6 +25,42 @@ func TestMiddlewareStack(t *testing.T) {
 		handler.ServeHTTP(w, req)
 		if w.Code != http.StatusOK {
 			t.Fatalf("expected 200, got %d", w.Code)
+		}
+	})
+
+	// 1b. Test Logger with QueryTracker debug info
+	t.Run("Logger With QueryTracker", func(t *testing.T) {
+		config.AppConfig = &config.Config{
+			AppDebug: true,
+			AppEnv:   "development",
+		}
+		handler := middleware.Logger(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			database.TrackQuery(r.Context(), "SELECT * FROM users WHERE id = ?", []interface{}{1}, 2*time.Millisecond)
+			database.TrackQuery(r.Context(), "SELECT COUNT(*) FROM posts", nil, 1*time.Millisecond)
+			response.Item(w, map[string]string{"name": "test"}, "Success")
+		}))
+
+		req := httptest.NewRequest(http.MethodGet, "/test-query", nil)
+		w := httptest.NewRecorder()
+		handler.ServeHTTP(w, req)
+
+		var res response.Response
+		if err := json.Unmarshal(w.Body.Bytes(), &res); err != nil {
+			t.Fatalf("failed to parse json response: %v", err)
+		}
+		if res.Debug == nil {
+			t.Fatalf("expected debug info in response")
+		}
+		dbg, ok := res.Debug.(map[string]interface{})
+		if !ok {
+			t.Fatalf("expected map debug info, got %T", res.Debug)
+		}
+		if qCount, ok := dbg["query_count"].(float64); !ok || int(qCount) != 2 {
+			t.Fatalf("expected query_count = 2, got %v", dbg["query_count"])
+		}
+		queries, ok := dbg["queries"].([]interface{})
+		if !ok || len(queries) != 2 {
+			t.Fatalf("expected 2 queries logged, got %v", dbg["queries"])
 		}
 	})
 

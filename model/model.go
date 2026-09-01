@@ -1,6 +1,7 @@
 package model
 
 import (
+	"context"
 	"database/sql"
 
 	"github.com/wibiesana/padi_go_core/activerecord"
@@ -119,36 +120,36 @@ func GetPkConditions(m Model, id interface{}) (map[string]interface{}, error) {
 	return activerecord.GetPkConditions(m, id)
 }
 
-func Find[T Model](id interface{}) (*T, error) {
-	return activerecord.Find[T](id)
+func Find[T Model](id interface{}, contexts ...context.Context) (*T, error) {
+	return activerecord.Find[T](id, contexts...)
 }
 
-func FindByPk[T Model](id interface{}, columns ...string) (*T, error) {
-	return activerecord.FindByPk[T](id, columns...)
+func FindByPk[T Model](id interface{}, contexts ...context.Context) (*T, error) {
+	return activerecord.FindByPk[T](id, contexts...)
 }
 
-func FindOne[T Model](condition interface{}, columns ...string) (*T, error) {
-	return activerecord.FindOne[T](condition, columns...)
+func FindOne[T Model](condition interface{}, contexts ...context.Context) (*T, error) {
+	return activerecord.FindOne[T](condition, contexts...)
 }
 
 func FindAll[T Model](condition ...interface{}) ([]T, error) {
 	return activerecord.FindAll[T](condition...)
 }
 
-func FindOrFail[T Model](id interface{}, columns ...string) (*T, error) {
-	return activerecord.FindOrFail[T](id, columns...)
+func FindOrFail[T Model](id interface{}, contexts ...context.Context) (*T, error) {
+	return activerecord.FindOrFail[T](id, contexts...)
 }
 
 func FindBy[T Model](column string, val interface{}) (*T, error) {
 	return activerecord.FindBy[T](column, val)
 }
 
-func All[T Model](columns ...string) ([]T, error) {
-	return activerecord.All[T](columns...)
+func All[T Model](contexts ...context.Context) ([]T, error) {
+	return activerecord.All[T](contexts...)
 }
 
-func Get[T Model](columns ...string) ([]T, error) {
-	return activerecord.Get[T](columns...)
+func Get[T Model](contexts ...context.Context) ([]T, error) {
+	return activerecord.Get[T](contexts...)
 }
 
 func Where[T Model](column string, args ...interface{}) *query.Query {
@@ -163,8 +164,8 @@ func Count[T Model](conditions ...map[string]interface{}) (int64, error) {
 	return activerecord.Count[T](conditions...)
 }
 
-func Paginate[T Model](opts query.Options, searchColumns ...string) (response.Pagination, []T, error) {
-	return activerecord.Paginate[T](opts, searchColumns...)
+func Paginate[T Model](opts query.Options, searchColumns []string, contexts ...context.Context) (response.Pagination, []T, error) {
+	return activerecord.Paginate[T](opts, searchColumns, contexts...)
 }
 
 func PaginateWithConditions[T Model](page int, perPage int, conditions map[string]interface{}, orderBy ...string) (response.Pagination, []T, error) {
@@ -203,16 +204,16 @@ func DeleteAll[T Model](condition ...interface{}) (int64, error) {
 	return activerecord.DeleteAll[T](condition...)
 }
 
-func Save(m any) error {
-	return activerecord.Save(m)
+func Save(m any, contexts ...context.Context) error {
+	return activerecord.Save(m, contexts...)
 }
 
-func DeleteModel(m any) error {
-	return activerecord.DeleteModel(m)
+func DeleteModel(m any, contexts ...context.Context) error {
+	return activerecord.DeleteModel(m, contexts...)
 }
 
-func SoftDelete(m any) error {
-	return activerecord.SoftDelete(m)
+func SoftDelete(m any, contexts ...context.Context) error {
+	return activerecord.SoftDelete(m, contexts...)
 }
 
 func SoftDeleteByID[T Model](id interface{}) error {
