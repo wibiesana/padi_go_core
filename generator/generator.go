@@ -130,6 +130,26 @@ func MapSQLTypeToGoType(sqlType string, isNullable bool) string {
 	}
 }
 
+func getNonEmptyCondition(col ColumnInfo) string {
+	fieldName := ColumnToFieldName(col.Name)
+	if strings.Contains(col.GoType, "*") {
+		if strings.Contains(col.GoType, "int") || strings.Contains(col.GoType, "uint") {
+			return fmt.Sprintf("item.%s != nil && *item.%s > 0", fieldName, fieldName)
+		}
+		if strings.Contains(col.GoType, "string") {
+			return fmt.Sprintf("item.%s != nil && *item.%s != \"\"", fieldName, fieldName)
+		}
+		return fmt.Sprintf("item.%s != nil", fieldName)
+	}
+	if strings.Contains(col.GoType, "int") || strings.Contains(col.GoType, "uint") {
+		return fmt.Sprintf("item.%s > 0", fieldName)
+	}
+	if strings.Contains(col.GoType, "string") {
+		return fmt.Sprintf("item.%s != \"\"", fieldName)
+	}
+	return fmt.Sprintf("item.%s != nil", fieldName)
+}
+
 // GetTableColumns inspects DB table schema
 func (g *Generator) GetTableColumns(tableName string) ([]ColumnInfo, error) {
 	var columns []ColumnInfo
@@ -636,26 +656,27 @@ func (g *Generator) generateBaseResource(tableName, modelName string, columns []
 		fieldsMapping.WriteString(fmt.Sprintf("\t\t\"%s\": item.%s,\n", col.JSONName, fieldName))
 
 		colLower := strings.ToLower(col.Name)
+		condCheck := getNonEmptyCondition(col)
 		if colLower == "created_by" {
 			hasRelations = true
 			relationsCode.WriteString(fmt.Sprintf(`
-	if item.%s > 0 {
+	if %s {
 		if rel, val := activerecord.FindRelation("users", item.%s, "username"); rel != nil {
 			data["createdBy"] = rel
 			data["createdBy_name"] = val
 		}
 	}
-`, fieldName, fieldName))
+`, condCheck, fieldName))
 		} else if colLower == "updated_by" {
 			hasRelations = true
 			relationsCode.WriteString(fmt.Sprintf(`
-	if item.%s > 0 {
+	if %s {
 		if rel, val := activerecord.FindRelation("users", item.%s, "username"); rel != nil {
 			data["updatedBy"] = rel
 			data["updatedBy_name"] = val
 		}
 	}
-`, fieldName, fieldName))
+`, condCheck, fieldName))
 		} else if strings.HasSuffix(colLower, "_id") && colLower != "id" {
 			hasRelations = true
 			relName := strings.TrimSuffix(colLower, "_id")
@@ -668,13 +689,13 @@ func (g *Generator) generateBaseResource(tableName, modelName string, columns []
 				displayCol = "username"
 			}
 			relationsCode.WriteString(fmt.Sprintf(`
-	if item.%s > 0 {
+	if %s {
 		if rel, val := activerecord.FindRelation("%s", item.%s, "%s"); rel != nil {
 			data["%s"] = rel
 			data["%s_name"] = val
 		}
 	}
-`, fieldName, relTable, fieldName, displayCol, relName, relName))
+`, condCheck, relTable, fieldName, displayCol, relName, relName))
 		}
 	}
 
