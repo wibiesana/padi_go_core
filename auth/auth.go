@@ -1,6 +1,8 @@
 package auth
 
 import (
+	"crypto/rand"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"time"
@@ -90,4 +92,11 @@ func ValidateToken(tokenString string) (*JWTClaims, error) {
 	}
 
 	return nil, errors.New("invalid or expired token")
+}
+
+// GenerateSecureRandomString generates cryptographically secure random alphanumeric string
+func GenerateSecureRandomString(length int) string {
+	bytes := make([]byte, length)
+	_, _ = rand.Read(bytes)
+	return hex.EncodeToString(bytes)[:length]
 }

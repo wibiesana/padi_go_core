@@ -1103,45 +1103,40 @@ func (q *Query) Delete() (int64, error) {
 	return res.RowsAffected()
 }
 
-// scanStruct helper maps SQL row columns into struct fields using json or db tags
+// scanStruct maps database row columns to struct fields
 func scanStruct(rows *sql.Rows, dest interface{}) error {
+	destVal := reflect.ValueOf(dest)
+	if destVal.Kind() != reflect.Ptr || destVal.IsNil() {
+		return fmt.Errorf("destination must be a non-nil pointer to a struct")
+	}
+
+	structVal := destVal.Elem()
+	if structVal.Kind() != reflect.Struct {
+		return fmt.Errorf("destination must point to a struct")
+	}
+
 	cols, err := rows.Columns()
 	if err != nil {
 		return err
 	}
 
-	destVal := reflect.ValueOf(dest)
-	if destVal.Kind() != reflect.Ptr || destVal.Elem().Kind() != reflect.Struct {
-		return fmt.Errorf("dest must be a pointer to a struct")
-	}
-
-	structVal := destVal.Elem()
 	fieldMap := make(map[string]reflect.Value)
 	mapStructFields(structVal, fieldMap)
 
 	values := make([]interface{}, len(cols))
-	for i, col := range cols {
-		colLower := strings.ToLower(col)
-		if field, exists := fieldMap[colLower]; exists && field.CanSet() {
-			values[i] = reflect.New(reflect.PtrTo(field.Type())).Interface()
-		} else {
-			var unused interface{}
-			values[i] = &unused
-		}
+	scanPointers := make([]interface{}, len(cols))
+	for i := range cols {
+		scanPointers[i] = &values[i]
 	}
 
-	if err := rows.Scan(values...); err != nil {
+	if err := rows.Scan(scanPointers...); err != nil {
 		return err
 	}
 
 	for i, col := range cols {
 		colLower := strings.ToLower(col)
 		if field, exists := fieldMap[colLower]; exists && field.CanSet() {
-			valPtr := reflect.ValueOf(values[i]).Elem()
-			if !valPtr.IsNil() {
-				rawVal := valPtr.Elem().Interface()
-				assignField(field, rawVal)
-			}
+			assignField(field, values[i])
 		}
 	}
 
@@ -1176,9 +1171,21 @@ func assignField(field reflect.Value, rawVal interface{}) {
 		return
 	}
 
+	if field.Kind() == reflect.Ptr {
+		elemType := field.Type().Elem()
+		newVal := reflect.New(elemType)
+		assignField(newVal.Elem(), rawVal)
+		field.Set(newVal)
+		return
+	}
+
 	switch field.Kind() {
 	case reflect.String:
-		field.SetString(fmt.Sprintf("%v", rawVal))
+		if b, ok := rawVal.([]byte); ok {
+			field.SetString(string(b))
+		} else {
+			field.SetString(fmt.Sprintf("%v", rawVal))
+		}
 	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
 		if n, ok := rawVal.(int64); ok {
 			field.SetInt(n)
@@ -1211,6 +1218,8 @@ func assignField(field reflect.Value, rawVal interface{}) {
 				} else if parsed, err := time.Parse("2006-01-02 15:04:05", str); err == nil {
 					field.Set(reflect.ValueOf(parsed))
 				}
+			} else if n, ok := rawVal.(int64); ok {
+				field.Set(reflect.ValueOf(time.Unix(n, 0)))
 			}
 		}
 	}

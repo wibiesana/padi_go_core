@@ -717,12 +717,38 @@ func Save(m any) error {
 		useAudit = aud.UseAudit()
 	}
 
+	// Filter fieldValues to only include columns that actually exist in the table (if table columns are introspectable)
+	if tableCols, err := GetTableColumns(tableName); err == nil && len(tableCols) > 0 {
+		colMap := make(map[string]bool, len(tableCols))
+		for _, tc := range tableCols {
+			colMap[strings.ToLower(tc)] = true
+		}
+		for k := range fieldValues {
+			if !colMap[strings.ToLower(k)] {
+				delete(fieldValues, k)
+			}
+		}
+	}
+
 	if isUpdate {
 		// UPDATE
 		delete(fieldValues, pkName)
 		delete(fieldValues, "created_at")
 		if useAudit {
-			fieldValues["updated_at"] = now
+			if tableCols, err := GetTableColumns(tableName); err == nil && len(tableCols) > 0 {
+				hasUpdatedAt := false
+				for _, tc := range tableCols {
+					if strings.ToLower(tc) == "updated_at" {
+						hasUpdatedAt = true
+						break
+					}
+				}
+				if hasUpdatedAt {
+					fieldValues["updated_at"] = now
+				}
+			} else {
+				fieldValues["updated_at"] = now
+			}
 		}
 
 		var setClauses []string
@@ -761,10 +787,25 @@ func Save(m any) error {
 	// INSERT
 	delete(fieldValues, pkName)
 	if useAudit {
-		if _, ok := fieldValues["created_at"]; !ok || fieldValues["created_at"] == nil {
-			fieldValues["created_at"] = now
+		if tableCols, err := GetTableColumns(tableName); err == nil && len(tableCols) > 0 {
+			colMap := make(map[string]bool, len(tableCols))
+			for _, tc := range tableCols {
+				colMap[strings.ToLower(tc)] = true
+			}
+			if colMap["created_at"] {
+				if _, ok := fieldValues["created_at"]; !ok || fieldValues["created_at"] == nil {
+					fieldValues["created_at"] = now
+				}
+			}
+			if colMap["updated_at"] {
+				fieldValues["updated_at"] = now
+			}
+		} else {
+			if _, ok := fieldValues["created_at"]; !ok || fieldValues["created_at"] == nil {
+				fieldValues["created_at"] = now
+			}
+			fieldValues["updated_at"] = now
 		}
-		fieldValues["updated_at"] = now
 	}
 
 	var columns []string
@@ -1054,15 +1095,6 @@ func Query[T any](sqlStr string, args ...interface{}) ([]T, error) {
 
 // GetTableColumns inspects table column names cached with TTL
 func GetTableColumns(tableName string) ([]string, error) {
-	columnsCacheMu.RLock()
-	if entry, ok := columnsCache[tableName]; ok {
-		if time.Since(entry.cachedAt) < columnsCacheTTL {
-			columnsCacheMu.RUnlock()
-			return entry.columns, nil
-		}
-	}
-	columnsCacheMu.RUnlock()
-
 	db := database.GetDB()
 	driver := database.GetDriver()
 	var columns []string
@@ -1121,13 +1153,6 @@ func GetTableColumns(tableName string) ([]string, error) {
 			return nil, err
 		}
 	}
-
-	columnsCacheMu.Lock()
-	columnsCache[tableName] = columnCacheEntry{
-		columns:  columns,
-		cachedAt: time.Now(),
-	}
-	columnsCacheMu.Unlock()
 
 	return columns, nil
 }
