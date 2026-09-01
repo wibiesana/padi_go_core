@@ -404,9 +404,9 @@ func (g *Generator) autoRegisterRoute(tableName, modelName string) error {
 		return nil
 	}
 
-	// Target insertion inside protected group if available
-	protectedTarget := "protected.Use(middleware.AuthRequired)"
-	if idx := strings.Index(content, protectedTarget); idx != -1 {
+	// Target insertion: Look for protected API Resources block
+	apiResourcesTarget := "// Users CRUD Resource"
+	if idx := strings.Index(content, apiResourcesTarget); idx != -1 {
 		routeSnippet := fmt.Sprintf(`
 		// %s CRUD Resource
 		protected.Route("/%s", func(r chi.Router) {
@@ -417,10 +417,10 @@ func (g *Generator) autoRegisterRoute(tableName, modelName string) error {
 			r.Get("/{id}", ctrl.Show)
 			r.Put("/{id}", ctrl.Update)
 			r.Delete("/{id}", ctrl.Destroy)
-		})`, modelName, routePath, modelName)
+		})
+`, modelName, routePath, modelName)
 
-		insertPos := idx + len(protectedTarget)
-		newContent := content[:insertPos] + routeSnippet + content[insertPos:]
+		newContent := content[:idx] + routeSnippet + "\t\t" + content[idx:]
 		if err := os.WriteFile(routesFile, []byte(newContent), 0644); err != nil {
 			return err
 		}
@@ -430,7 +430,7 @@ func (g *Generator) autoRegisterRoute(tableName, modelName string) error {
 
 	// Secondary Target: Look for r.Mux.Group
 	muxGroupTarget := "r.Mux.Group(func(protected chi.Router) {"
-	if idx := strings.Index(content, muxGroupTarget); idx != -1 {
+	if idx := strings.LastIndex(content, muxGroupTarget); idx != -1 {
 		routeSnippet := fmt.Sprintf(`
 		// %s CRUD Resource
 		protected.Route("/%s", func(r chi.Router) {
