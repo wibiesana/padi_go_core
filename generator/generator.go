@@ -747,8 +747,16 @@ func (g *Generator) generateConcreteResource(modelName string) error {
 	}
 
 	targetFile := filepath.Join(dir, modelName+"Resource.go")
-	if _, err := os.Stat(targetFile); err == nil {
-		// Do not overwrite concrete resource if already exists
+	if content, err := os.ReadFile(targetFile); err == nil {
+		str := string(content)
+		if strings.Contains(str, "map[string]interface{}") {
+			str = strings.ReplaceAll(str, "map[string]interface{}", "*activerecord.Map")
+			str = strings.ReplaceAll(str, "[]map[string]interface{}", "[]*activerecord.Map")
+			if !strings.Contains(str, "github.com/wibiesana/padi_go_core/activerecord") {
+				str = strings.Replace(str, "import (", "import (\n\t\"github.com/wibiesana/padi_go_core/activerecord\"", 1)
+			}
+			_ = os.WriteFile(targetFile, []byte(str), 0644)
+		}
 		return nil
 	}
 
