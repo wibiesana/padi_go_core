@@ -74,10 +74,29 @@ func TestActiveRecord(t *testing.T) {
 		t.Fatalf("failed to find: %v", err)
 	}
 
+	// Test passing columns as slice
+	cols := []string{"id", "title"}
+	allWithCols, err := activerecord.All[TestArticle](cols)
+	if err != nil || len(allWithCols) != 1 {
+		t.Fatalf("failed All with slice columns: %v", err)
+	}
+
+	// Test passing columns as variadic strings
+	foundWithCols, err := activerecord.FindByPk[TestArticle](art.ID, "id", "title")
+	if err != nil || foundWithCols == nil {
+		t.Fatalf("failed FindByPk with string columns: %v", err)
+	}
+
 	opts := query.Options{Page: 1, PerPage: 10}
 	meta, list, err := activerecord.Paginate[TestArticle](opts, []string{"title"})
 	if err != nil || len(list) != 1 || meta.Total != 1 {
 		t.Fatalf("paginate failed")
+	}
+
+	// Test Paginate with variadic string search columns
+	meta2, list2, err := activerecord.Paginate[TestArticle](opts, "title", "content")
+	if err != nil || len(list2) != 1 || meta2.Total != 1 {
+		t.Fatalf("paginate with variadic search columns failed")
 	}
 
 	// 3. Delete

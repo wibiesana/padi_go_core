@@ -120,36 +120,36 @@ func GetPkConditions(m Model, id interface{}) (map[string]interface{}, error) {
 	return activerecord.GetPkConditions(m, id)
 }
 
-func Find[T Model](id interface{}, contexts ...context.Context) (*T, error) {
-	return activerecord.Find[T](id, contexts...)
+func Find[T Model](id interface{}, args ...any) (*T, error) {
+	return activerecord.Find[T](id, args...)
 }
 
-func FindByPk[T Model](id interface{}, contexts ...context.Context) (*T, error) {
-	return activerecord.FindByPk[T](id, contexts...)
+func FindByPk[T Model](id interface{}, args ...any) (*T, error) {
+	return activerecord.FindByPk[T](id, args...)
 }
 
-func FindOne[T Model](condition interface{}, contexts ...context.Context) (*T, error) {
-	return activerecord.FindOne[T](condition, contexts...)
+func FindOne[T Model](condition interface{}, args ...any) (*T, error) {
+	return activerecord.FindOne[T](condition, args...)
 }
 
 func FindAll[T Model](condition ...interface{}) ([]T, error) {
 	return activerecord.FindAll[T](condition...)
 }
 
-func FindOrFail[T Model](id interface{}, contexts ...context.Context) (*T, error) {
-	return activerecord.FindOrFail[T](id, contexts...)
+func FindOrFail[T Model](id interface{}, args ...any) (*T, error) {
+	return activerecord.FindOrFail[T](id, args...)
 }
 
 func FindBy[T Model](column string, val interface{}) (*T, error) {
 	return activerecord.FindBy[T](column, val)
 }
 
-func All[T Model](contexts ...context.Context) ([]T, error) {
-	return activerecord.All[T](contexts...)
+func All[T Model](args ...any) ([]T, error) {
+	return activerecord.All[T](args...)
 }
 
-func Get[T Model](contexts ...context.Context) ([]T, error) {
-	return activerecord.Get[T](contexts...)
+func Get[T Model](args ...any) ([]T, error) {
+	return activerecord.Get[T](args...)
 }
 
 func Where[T Model](column string, args ...interface{}) *query.Query {
@@ -164,8 +164,8 @@ func Count[T Model](conditions ...map[string]interface{}) (int64, error) {
 	return activerecord.Count[T](conditions...)
 }
 
-func Paginate[T Model](opts query.Options, searchColumns []string, contexts ...context.Context) (response.Pagination, []T, error) {
-	return activerecord.Paginate[T](opts, searchColumns, contexts...)
+func Paginate[T Model](opts query.Options, args ...any) (response.Pagination, []T, error) {
+	return activerecord.Paginate[T](opts, args...)
 }
 
 func PaginateWithConditions[T Model](page int, perPage int, conditions map[string]interface{}, orderBy ...string) (response.Pagination, []T, error) {
