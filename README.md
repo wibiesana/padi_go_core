@@ -63,7 +63,25 @@ logger.Info("User logged in", map[string]interface{}{"user_id": 42, "ip": "127.0
 logger.Error("Database connection timed out", map[string]interface{}{"retry_count": 3})
 ```
 
-### 2. Fluent Query Builder & Caching
+### 2. ActiveRecord with Context-Aware Audit Trail & Timestamps
+```go
+import (
+    "net/http"
+    "github.com/wibiesana/padi_go_core/activerecord"
+)
+
+func CreateArticle(w http.ResponseWriter, r *http.Request) {
+    article := Article{Title: "Padi Go Framework"}
+
+    // Automatically populates created_at, updated_at, created_by, and updated_by
+    if err := activerecord.Save(&article, r.Context()); err != nil {
+        http.Error(w, err.Error(), http.StatusInternalServerError)
+        return
+    }
+}
+```
+
+### 3. Fluent Query Builder & Caching
 ```go
 import (
     "time"

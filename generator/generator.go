@@ -495,7 +495,11 @@ func (g *Generator) generateBaseModel(tableName, modelName string, columns []Col
 			hasTime = true
 		}
 
-		tag := fmt.Sprintf(`db:"%s" json:"%s"`, col.Name, col.JSONName)
+		jsonTag := col.JSONName
+		if strings.ToLower(col.Name) == "password" || strings.ToLower(col.Name) == "remember_token" {
+			jsonTag = "-"
+		}
+		tag := fmt.Sprintf(`db:"%s" json:"%s"`, col.Name, jsonTag)
 		if col.ValidateTag != "" {
 			tag += " " + col.ValidateTag
 		}
@@ -817,7 +821,7 @@ func (c *{{ModelName}}Controller) Store(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	if err := activerecord.Save(&item); err != nil {
+	if err := activerecord.Save(&item, r.Context()); err != nil {
 		response.InternalServerError(w, "Failed to create {{ModelName}}: "+err.Error())
 		return
 	}
@@ -845,7 +849,7 @@ func (c *{{ModelName}}Controller) Update(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	if err := activerecord.Save(item); err != nil {
+	if err := activerecord.Save(item, r.Context()); err != nil {
 		response.InternalServerError(w, "Failed to update {{ModelName}}")
 		return
 	}
@@ -951,6 +955,28 @@ func (g *Generator) generateAPICollection(tableName, modelName string, columns [
 			"name":        fmt.Sprintf("%s API", modelName),
 			"description": fmt.Sprintf("REST API endpoints for %s resource", modelName),
 			"schema":      "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+		},
+		"auth": map[string]interface{}{
+			"type": "bearer",
+			"bearer": []map[string]string{
+				{
+					"key":   "token",
+					"value": "{{token}}",
+					"type":  "string",
+				},
+			},
+		},
+		"variable": []map[string]string{
+			{
+				"key":   "base_url",
+				"value": "http://localhost:8080",
+				"type":  "string",
+			},
+			{
+				"key":   "token",
+				"value": "",
+				"type":  "string",
+			},
 		},
 		"item": []map[string]interface{}{
 			{

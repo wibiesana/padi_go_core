@@ -1,6 +1,7 @@
 package activerecord
 
 import (
+	"context"
 	"database/sql"
 	"fmt"
 	"reflect"
@@ -667,8 +668,32 @@ func resolveTableName(m any, val reflect.Value) string {
 	return ""
 }
 
-// Save inserts or updates a model instance automatically with Lifecycle Hooks and Timestamps
-func Save(m any) error {
+func isNilOrZero(v interface{}) bool {
+	if v == nil {
+		return true
+	}
+	rv := reflect.ValueOf(v)
+	switch rv.Kind() {
+	case reflect.Ptr, reflect.Interface:
+		if rv.IsNil() {
+			return true
+		}
+		return isNilOrZero(rv.Elem().Interface())
+	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
+		return rv.Int() == 0
+	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
+		return rv.Uint() == 0
+	case reflect.String:
+		return rv.String() == ""
+	}
+	if t, ok := v.(time.Time); ok {
+		return t.IsZero()
+	}
+	return false
+}
+
+// Save inserts or updates a model instance automatically with Lifecycle Hooks, Timestamps, and Audit Authors (created_by/updated_by)
+func Save(m any, contexts ...context.Context) error {
 	db := database.GetDB()
 	driver := database.GetDriver()
 
@@ -701,6 +726,21 @@ func Save(m any) error {
 		}
 	}
 
+	// Extract authenticated User ID from context if provided
+	var userID uint = 0
+	if len(contexts) > 0 && contexts[0] != nil {
+		ctx := contexts[0]
+		if id, ok := ctx.Value("padi_user_id").(uint); ok {
+			userID = id
+		} else if id, ok := ctx.Value("user_id").(uint); ok {
+			userID = id
+		} else if id, ok := ctx.Value("user_id").(int); ok && id > 0 {
+			userID = uint(id)
+		} else if id, ok := ctx.Value("user_id").(int64); ok && id > 0 {
+			userID = uint(id)
+		}
+	}
+
 	// 1. BeforeSave Hook
 	if hook, ok := m.(BeforeSaver); ok {
 		if err := hook.BeforeSave(!isUpdate); err != nil {
@@ -713,8 +753,27 @@ func Save(m any) error {
 
 	// Apply Audits
 	useAudit := true
+	createdAtCol := "created_at"
+	updatedAtCol := "updated_at"
+	createdByCol := "created_by"
+	updatedByCol := "updated_by"
+
 	if aud, ok := m.(Auditable); ok {
 		useAudit = aud.UseAudit()
+		if customFields := aud.AuditFields(); len(customFields) > 0 {
+			if col, ok := customFields["created_at"]; ok {
+				createdAtCol = col
+			}
+			if col, ok := customFields["updated_at"]; ok {
+				updatedAtCol = col
+			}
+			if col, ok := customFields["created_by"]; ok {
+				createdByCol = col
+			}
+			if col, ok := customFields["updated_by"]; ok {
+				updatedByCol = col
+			}
+		}
 	}
 
 	// Filter fieldValues to only include columns that actually exist in the table (if table columns are introspectable)
@@ -733,21 +792,35 @@ func Save(m any) error {
 	if isUpdate {
 		// UPDATE
 		delete(fieldValues, pkName)
-		delete(fieldValues, "created_at")
+		if createdAtCol != "" {
+			delete(fieldValues, strings.ToLower(createdAtCol))
+		}
+		if createdByCol != "" {
+			delete(fieldValues, strings.ToLower(createdByCol))
+		}
 		if useAudit {
 			if tableCols, err := GetTableColumns(tableName); err == nil && len(tableCols) > 0 {
-				hasUpdatedAt := false
+				colMap := make(map[string]bool, len(tableCols))
 				for _, tc := range tableCols {
-					if strings.ToLower(tc) == "updated_at" {
-						hasUpdatedAt = true
-						break
-					}
+					colMap[strings.ToLower(tc)] = true
 				}
-				if hasUpdatedAt {
-					fieldValues["updated_at"] = now
+				if updatedAtCol != "" && colMap[strings.ToLower(updatedAtCol)] {
+					fieldValues[strings.ToLower(updatedAtCol)] = now
+					setStructFieldsFromMap(val, map[string]interface{}{updatedAtCol: now})
+				}
+				if updatedByCol != "" && colMap[strings.ToLower(updatedByCol)] && userID > 0 {
+					fieldValues[strings.ToLower(updatedByCol)] = userID
+					setStructFieldsFromMap(val, map[string]interface{}{updatedByCol: userID})
 				}
 			} else {
-				fieldValues["updated_at"] = now
+				if updatedAtCol != "" {
+					fieldValues[strings.ToLower(updatedAtCol)] = now
+					setStructFieldsFromMap(val, map[string]interface{}{updatedAtCol: now})
+				}
+				if updatedByCol != "" && userID > 0 {
+					fieldValues[strings.ToLower(updatedByCol)] = userID
+					setStructFieldsFromMap(val, map[string]interface{}{updatedByCol: userID})
+				}
 			}
 		}
 
@@ -792,19 +865,49 @@ func Save(m any) error {
 			for _, tc := range tableCols {
 				colMap[strings.ToLower(tc)] = true
 			}
-			if colMap["created_at"] {
-				if _, ok := fieldValues["created_at"]; !ok || fieldValues["created_at"] == nil {
-					fieldValues["created_at"] = now
+			if createdAtCol != "" && colMap[strings.ToLower(createdAtCol)] {
+				if isNilOrZero(fieldValues[strings.ToLower(createdAtCol)]) {
+					fieldValues[strings.ToLower(createdAtCol)] = now
+					setStructFieldsFromMap(val, map[string]interface{}{createdAtCol: now})
 				}
 			}
-			if colMap["updated_at"] {
-				fieldValues["updated_at"] = now
+			if updatedAtCol != "" && colMap[strings.ToLower(updatedAtCol)] {
+				if isNilOrZero(fieldValues[strings.ToLower(updatedAtCol)]) {
+					fieldValues[strings.ToLower(updatedAtCol)] = now
+					setStructFieldsFromMap(val, map[string]interface{}{updatedAtCol: now})
+				}
+			}
+			if createdByCol != "" && colMap[strings.ToLower(createdByCol)] && userID > 0 {
+				if isNilOrZero(fieldValues[strings.ToLower(createdByCol)]) {
+					fieldValues[strings.ToLower(createdByCol)] = userID
+					setStructFieldsFromMap(val, map[string]interface{}{createdByCol: userID})
+				}
+			}
+			if updatedByCol != "" && colMap[strings.ToLower(updatedByCol)] && userID > 0 {
+				if isNilOrZero(fieldValues[strings.ToLower(updatedByCol)]) {
+					fieldValues[strings.ToLower(updatedByCol)] = userID
+					setStructFieldsFromMap(val, map[string]interface{}{updatedByCol: userID})
+				}
 			}
 		} else {
-			if _, ok := fieldValues["created_at"]; !ok || fieldValues["created_at"] == nil {
-				fieldValues["created_at"] = now
+			if createdAtCol != "" && isNilOrZero(fieldValues[strings.ToLower(createdAtCol)]) {
+				fieldValues[strings.ToLower(createdAtCol)] = now
+				setStructFieldsFromMap(val, map[string]interface{}{createdAtCol: now})
 			}
-			fieldValues["updated_at"] = now
+			if updatedAtCol != "" && isNilOrZero(fieldValues[strings.ToLower(updatedAtCol)]) {
+				fieldValues[strings.ToLower(updatedAtCol)] = now
+				setStructFieldsFromMap(val, map[string]interface{}{updatedAtCol: now})
+			}
+			if userID > 0 {
+				if createdByCol != "" && isNilOrZero(fieldValues[strings.ToLower(createdByCol)]) {
+					fieldValues[strings.ToLower(createdByCol)] = userID
+					setStructFieldsFromMap(val, map[string]interface{}{createdByCol: userID})
+				}
+				if updatedByCol != "" && isNilOrZero(fieldValues[strings.ToLower(updatedByCol)]) {
+					fieldValues[strings.ToLower(updatedByCol)] = userID
+					setStructFieldsFromMap(val, map[string]interface{}{updatedByCol: userID})
+				}
+			}
 		}
 	}
 
@@ -1272,17 +1375,33 @@ func assignField(field reflect.Value, rawVal interface{}) {
 		return
 	}
 
+	if field.Kind() == reflect.Ptr {
+		if field.IsNil() {
+			field.Set(reflect.New(field.Type().Elem()))
+		}
+		assignField(field.Elem(), rawVal)
+		return
+	}
+
 	switch field.Kind() {
 	case reflect.String:
-		field.SetString(fmt.Sprintf("%v", rawVal))
+		if t, ok := rawVal.(time.Time); ok {
+			field.SetString(t.Format(time.RFC3339))
+		} else {
+			field.SetString(fmt.Sprintf("%v", rawVal))
+		}
 	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
-		if n, ok := rawVal.(int64); ok {
+		if t, ok := rawVal.(time.Time); ok {
+			field.SetInt(t.Unix())
+		} else if n, ok := rawVal.(int64); ok {
 			field.SetInt(n)
 		} else if s, err := strconv.ParseInt(fmt.Sprintf("%v", rawVal), 10, 64); err == nil {
 			field.SetInt(s)
 		}
 	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
-		if n, ok := rawVal.(int64); ok && n >= 0 {
+		if t, ok := rawVal.(time.Time); ok {
+			field.SetUint(uint64(t.Unix()))
+		} else if n, ok := rawVal.(int64); ok && n >= 0 {
 			field.SetUint(uint64(n))
 		} else if s, err := strconv.ParseUint(fmt.Sprintf("%v", rawVal), 10, 64); err == nil {
 			field.SetUint(s)
@@ -1301,11 +1420,17 @@ func assignField(field reflect.Value, rawVal interface{}) {
 		if field.Type() == reflect.TypeOf(time.Time{}) {
 			if t, ok := rawVal.(time.Time); ok {
 				field.Set(reflect.ValueOf(t))
+			} else if pt, ok := rawVal.(*time.Time); ok && pt != nil {
+				field.Set(reflect.ValueOf(*pt))
+			} else if n, ok := rawVal.(int64); ok {
+				field.Set(reflect.ValueOf(time.Unix(n, 0).UTC()))
 			} else if str, ok := rawVal.(string); ok {
 				if parsed, err := time.Parse(time.RFC3339, str); err == nil {
 					field.Set(reflect.ValueOf(parsed))
 				} else if parsed, err := time.Parse("2006-01-02 15:04:05", str); err == nil {
 					field.Set(reflect.ValueOf(parsed))
+				} else if n, err := strconv.ParseInt(str, 10, 64); err == nil && n > 0 {
+					field.Set(reflect.ValueOf(time.Unix(n, 0).UTC()))
 				}
 			}
 		}
