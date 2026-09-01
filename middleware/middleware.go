@@ -37,12 +37,46 @@ func Logger(next http.Handler) http.Handler {
 	})
 }
 
-// Recoverer catches panics and returns 500 JSON response
+// Recoverer catches panics and returns 500 JSON response (including stack trace in development mode)
 func Recoverer(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		defer func() {
 			if rec := recover(); rec != nil {
-				log.Printf("[PANIC RECOVERED] %v\n%s", rec, string(debug.Stack()))
+				stackBytes := debug.Stack()
+				stackStr := string(stackBytes)
+				log.Printf("[PANIC RECOVERED] %v\n%s", rec, stackStr)
+
+				cfg := config.AppConfig
+				isDebug := cfg != nil && (cfg.AppDebug || cfg.AppEnv == "development" || cfg.AppEnv == "local")
+
+				if isDebug {
+					stackLines := strings.Split(strings.ReplaceAll(stackStr, "\r\n", "\n"), "\n")
+					var filteredStack []string
+					for _, line := range stackLines {
+						if trimmed := strings.TrimSpace(line); trimmed != "" {
+							filteredStack = append(filteredStack, trimmed)
+						}
+					}
+
+					debugInfo := map[string]interface{}{
+						"exception": fmt.Sprintf("%v", rec),
+						"file":      r.URL.Path,
+						"method":    r.Method,
+						"trace":     filteredStack,
+					}
+
+					res := response.Response{
+						Status:  http.StatusInternalServerError,
+						Success: false,
+						Message: fmt.Sprintf("Server Error: %v", rec),
+						Debug:   debugInfo,
+					}
+					w.Header().Set("Content-Type", "application/json; charset=utf-8")
+					w.WriteHeader(http.StatusInternalServerError)
+					_ = response.WriteJSON(w, res)
+					return
+				}
+
 				response.InternalServerError(w, "An unexpected server error occurred")
 			}
 		}()

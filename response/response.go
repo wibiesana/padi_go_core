@@ -15,6 +15,7 @@ type Response struct {
 	Data    interface{} `json:"data,omitempty"`
 	Meta    *Pagination `json:"meta,omitempty"`
 	Errors  interface{} `json:"errors,omitempty"`
+	Debug   interface{} `json:"debug,omitempty"`
 }
 
 // Pagination metadata structure matching Padi framework
@@ -25,6 +26,11 @@ type Pagination struct {
 	LastPage    int   `json:"last_page"`
 	From        int   `json:"from"`
 	To          int   `json:"to"`
+}
+
+// WriteJSON encodes any value as JSON to http.ResponseWriter
+func WriteJSON(w http.ResponseWriter, v interface{}) error {
+	return json.NewEncoder(w).Encode(v)
 }
 
 // JSON renders a standard JSON response
