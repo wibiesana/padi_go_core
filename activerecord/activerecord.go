@@ -11,7 +11,9 @@ import (
 	"sync"
 	"time"
 
+	"github.com/wibiesana/padi_go_core/auth"
 	"github.com/wibiesana/padi_go_core/database"
+	"github.com/wibiesana/padi_go_core/middleware"
 	"github.com/wibiesana/padi_go_core/query"
 	"github.com/wibiesana/padi_go_core/response"
 )
@@ -730,9 +732,13 @@ func Save(m any, contexts ...context.Context) error {
 	var userID uint = 0
 	if len(contexts) > 0 && contexts[0] != nil {
 		ctx := contexts[0]
-		if id, ok := ctx.Value("padi_user_id").(uint); ok {
+		if id, ok := ctx.Value(middleware.UserIDContextKey).(uint); ok && id > 0 {
 			userID = id
-		} else if id, ok := ctx.Value("user_id").(uint); ok {
+		} else if claims, ok := ctx.Value(middleware.UserContextKey).(*auth.JWTClaims); ok && claims != nil && claims.UserID > 0 {
+			userID = claims.UserID
+		} else if id, ok := ctx.Value("padi_user_id").(uint); ok && id > 0 {
+			userID = id
+		} else if id, ok := ctx.Value("user_id").(uint); ok && id > 0 {
 			userID = id
 		} else if id, ok := ctx.Value("user_id").(int); ok && id > 0 {
 			userID = uint(id)
@@ -808,18 +814,26 @@ func Save(m any, contexts ...context.Context) error {
 					fieldValues[strings.ToLower(updatedAtCol)] = now
 					setStructFieldsFromMap(val, map[string]interface{}{updatedAtCol: now})
 				}
-				if updatedByCol != "" && colMap[strings.ToLower(updatedByCol)] && userID > 0 {
-					fieldValues[strings.ToLower(updatedByCol)] = userID
-					setStructFieldsFromMap(val, map[string]interface{}{updatedByCol: userID})
+				if updatedByCol != "" && colMap[strings.ToLower(updatedByCol)] {
+					if userID > 0 {
+						fieldValues[strings.ToLower(updatedByCol)] = userID
+						setStructFieldsFromMap(val, map[string]interface{}{updatedByCol: userID})
+					} else if isNilOrZero(fieldValues[strings.ToLower(updatedByCol)]) {
+						delete(fieldValues, strings.ToLower(updatedByCol))
+					}
 				}
 			} else {
 				if updatedAtCol != "" {
 					fieldValues[strings.ToLower(updatedAtCol)] = now
 					setStructFieldsFromMap(val, map[string]interface{}{updatedAtCol: now})
 				}
-				if updatedByCol != "" && userID > 0 {
-					fieldValues[strings.ToLower(updatedByCol)] = userID
-					setStructFieldsFromMap(val, map[string]interface{}{updatedByCol: userID})
+				if updatedByCol != "" {
+					if userID > 0 {
+						fieldValues[strings.ToLower(updatedByCol)] = userID
+						setStructFieldsFromMap(val, map[string]interface{}{updatedByCol: userID})
+					} else if isNilOrZero(fieldValues[strings.ToLower(updatedByCol)]) {
+						delete(fieldValues, strings.ToLower(updatedByCol))
+					}
 				}
 			}
 		}
@@ -877,16 +891,24 @@ func Save(m any, contexts ...context.Context) error {
 					setStructFieldsFromMap(val, map[string]interface{}{updatedAtCol: now})
 				}
 			}
-			if createdByCol != "" && colMap[strings.ToLower(createdByCol)] && userID > 0 {
-				if isNilOrZero(fieldValues[strings.ToLower(createdByCol)]) {
-					fieldValues[strings.ToLower(createdByCol)] = userID
-					setStructFieldsFromMap(val, map[string]interface{}{createdByCol: userID})
+			if createdByCol != "" && colMap[strings.ToLower(createdByCol)] {
+				if userID > 0 {
+					if isNilOrZero(fieldValues[strings.ToLower(createdByCol)]) {
+						fieldValues[strings.ToLower(createdByCol)] = userID
+						setStructFieldsFromMap(val, map[string]interface{}{createdByCol: userID})
+					}
+				} else if isNilOrZero(fieldValues[strings.ToLower(createdByCol)]) {
+					fieldValues[strings.ToLower(createdByCol)] = nil
 				}
 			}
-			if updatedByCol != "" && colMap[strings.ToLower(updatedByCol)] && userID > 0 {
-				if isNilOrZero(fieldValues[strings.ToLower(updatedByCol)]) {
-					fieldValues[strings.ToLower(updatedByCol)] = userID
-					setStructFieldsFromMap(val, map[string]interface{}{updatedByCol: userID})
+			if updatedByCol != "" && colMap[strings.ToLower(updatedByCol)] {
+				if userID > 0 {
+					if isNilOrZero(fieldValues[strings.ToLower(updatedByCol)]) {
+						fieldValues[strings.ToLower(updatedByCol)] = userID
+						setStructFieldsFromMap(val, map[string]interface{}{updatedByCol: userID})
+					}
+				} else if isNilOrZero(fieldValues[strings.ToLower(updatedByCol)]) {
+					fieldValues[strings.ToLower(updatedByCol)] = nil
 				}
 			}
 		} else {
@@ -898,14 +920,24 @@ func Save(m any, contexts ...context.Context) error {
 				fieldValues[strings.ToLower(updatedAtCol)] = now
 				setStructFieldsFromMap(val, map[string]interface{}{updatedAtCol: now})
 			}
-			if userID > 0 {
-				if createdByCol != "" && isNilOrZero(fieldValues[strings.ToLower(createdByCol)]) {
-					fieldValues[strings.ToLower(createdByCol)] = userID
-					setStructFieldsFromMap(val, map[string]interface{}{createdByCol: userID})
+			if createdByCol != "" {
+				if userID > 0 {
+					if isNilOrZero(fieldValues[strings.ToLower(createdByCol)]) {
+						fieldValues[strings.ToLower(createdByCol)] = userID
+						setStructFieldsFromMap(val, map[string]interface{}{createdByCol: userID})
+					}
+				} else if isNilOrZero(fieldValues[strings.ToLower(createdByCol)]) {
+					fieldValues[strings.ToLower(createdByCol)] = nil
 				}
-				if updatedByCol != "" && isNilOrZero(fieldValues[strings.ToLower(updatedByCol)]) {
-					fieldValues[strings.ToLower(updatedByCol)] = userID
-					setStructFieldsFromMap(val, map[string]interface{}{updatedByCol: userID})
+			}
+			if updatedByCol != "" {
+				if userID > 0 {
+					if isNilOrZero(fieldValues[strings.ToLower(updatedByCol)]) {
+						fieldValues[strings.ToLower(updatedByCol)] = userID
+						setStructFieldsFromMap(val, map[string]interface{}{updatedByCol: userID})
+					}
+				} else if isNilOrZero(fieldValues[strings.ToLower(updatedByCol)]) {
+					fieldValues[strings.ToLower(updatedByCol)] = nil
 				}
 			}
 		}
