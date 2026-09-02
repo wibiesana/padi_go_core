@@ -1726,6 +1726,15 @@ func (m *Map) Get(key string) (any, bool) {
 	return val, ok
 }
 
+// Has checks if a key exists in the map
+func (m *Map) Has(key string) bool {
+	if m == nil || m.values == nil {
+		return false
+	}
+	_, ok := m.values[key]
+	return ok
+}
+
 // Keys returns all keys in insertion order
 func (m *Map) Keys() []string {
 	if m == nil {
@@ -1930,6 +1939,7 @@ type RelationContainer interface {
 	GetRelation(name string) (any, bool)
 	SetRelation(name string, val any)
 	RelationsMap() map[string]any
+	GetRelations() map[string]any
 }
 
 // ActiveRecord provides Base struct embedding for models with dynamic relation storage
@@ -1974,6 +1984,11 @@ func (a *ActiveRecord) GetRelation(name string) (any, bool) {
 
 // RelationsMap returns a copy of all loaded relations on this model instance
 func (a *ActiveRecord) RelationsMap() map[string]any {
+	return a.GetRelations()
+}
+
+// GetRelations returns a copy of all loaded relations on this model instance
+func (a *ActiveRecord) GetRelations() map[string]any {
 	if a == nil || a.relationsMu == nil {
 		return nil
 	}
@@ -1987,6 +2002,17 @@ func (a *ActiveRecord) RelationsMap() map[string]any {
 		cp[k] = v
 	}
 	return cp
+}
+
+// GetModelRelations safely extracts all preloaded relations from any model or container
+func GetModelRelations(item any) map[string]any {
+	if item == nil {
+		return nil
+	}
+	if rc, ok := item.(RelationContainer); ok {
+		return rc.GetRelations()
+	}
+	return nil
 }
 
 type relationSpec struct {

@@ -664,9 +664,7 @@ func (g *Generator) generateBaseResource(tableName, modelName string, columns []
 		condCheck := getNonEmptyCondition(col)
 		if colLower == "created_by" {
 			relationsCode.WriteString(fmt.Sprintf(`
-	if relVal, ok := item.GetRelation("createdBy"); ok {
-		m.Set("createdBy", relVal)
-	} else if %s {
+	if !m.Has("createdBy") && %s {
 		if rel, _ := activerecord.FindRelation("users", item.%s, "username"); rel != nil {
 			m.Set("createdBy", rel)
 		}
@@ -674,9 +672,7 @@ func (g *Generator) generateBaseResource(tableName, modelName string, columns []
 `, condCheck, fieldName))
 		} else if colLower == "updated_by" {
 			relationsCode.WriteString(fmt.Sprintf(`
-	if relVal, ok := item.GetRelation("updatedBy"); ok {
-		m.Set("updatedBy", relVal)
-	} else if %s {
+	if !m.Has("updatedBy") && %s {
 		if rel, _ := activerecord.FindRelation("users", item.%s, "username"); rel != nil {
 			m.Set("updatedBy", rel)
 		}
@@ -693,14 +689,12 @@ func (g *Generator) generateBaseResource(tableName, modelName string, columns []
 				displayCol = "username"
 			}
 			relationsCode.WriteString(fmt.Sprintf(`
-	if relVal, ok := item.GetRelation("%s"); ok {
-		m.Set("%s", relVal)
-	} else if %s {
+	if !m.Has("%s") && %s {
 		if rel, _ := activerecord.FindRelation("%s", item.%s, "%s"); rel != nil {
 			m.Set("%s", rel)
 		}
 	}
-`, relName, relName, condCheck, relTable, fieldName, displayCol, relName))
+`, relName, condCheck, relTable, fieldName, displayCol, relName))
 		}
 	}
 
@@ -723,8 +717,8 @@ func (r *{{ModelName}}Resource) ToMap(item *models.{{ModelName}}) *activerecord.
 	}
 	m := activerecord.NewMap()
 {{FieldsMapping}}
-	// Eager-loaded and resolved relations
-	if rels := item.GetRelations(); len(rels) > 0 {
+	// Attach eager-loaded relations if available
+	if rels := activerecord.GetModelRelations(item); len(rels) > 0 {
 		for k, v := range rels {
 			m.Set(k, v)
 		}
