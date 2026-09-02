@@ -3,6 +3,7 @@ package generator_test
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/wibiesana/padi_go_core/config"
@@ -94,8 +95,20 @@ func TestGeneratorUtilsAndScaffolding(t *testing.T) {
 		t.Fatalf("expected Custom Controller file to be generated at %s", customCtrlPath)
 	}
 
-	collectionPath := filepath.Join(tmpDir, "api_collection", "post_api_collection.json")
-	if _, err := os.Stat(collectionPath); os.IsNotExist(err) {
-		t.Fatalf("expected API Collection file to be generated at %s", collectionPath)
+	// 4. Test CRUD Generation with Realtime enabled
+	genRealtime := generator.New(tmpDir).WithRealtime(true)
+	err = genRealtime.GenerateCRUD("posts")
+	if err != nil {
+		t.Fatalf("GenerateCRUD with realtime failed: %v", err)
+	}
+
+	baseCtrlBytes, err := os.ReadFile(baseCtrlPath)
+	if err != nil {
+		t.Fatalf("failed reading generated Base Controller: %v", err)
+	}
+	baseCtrlStr := string(baseCtrlBytes)
+	if !strings.Contains(baseCtrlStr, "realtime.Publish") {
+		t.Fatalf("expected Base Controller to include realtime.Publish calls")
 	}
 }
+

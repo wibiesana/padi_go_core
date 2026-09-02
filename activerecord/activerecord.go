@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"math"
+	"net/http"
 	"reflect"
 	"regexp"
 	"strconv"
@@ -2432,6 +2433,28 @@ func assignRelationToStruct(val reflect.Value, relName string, relVal any) {
 			return
 		}
 	}
+}
+
+// LoadRelationsFromRequest parses ?with=rel1,rel2 query parameters from the HTTP request and eagerly loads them into items
+func LoadRelationsFromRequest(r *http.Request, items interface{}) error {
+	if r == nil || r.URL == nil || items == nil {
+		return nil
+	}
+	withParam := r.URL.Query().Get("with")
+	if withParam == "" {
+		return nil
+	}
+	rawRelations := strings.Split(withParam, ",")
+	var relations []string
+	for _, rel := range rawRelations {
+		if trimmed := strings.TrimSpace(rel); trimmed != "" {
+			relations = append(relations, trimmed)
+		}
+	}
+	if len(relations) == 0 {
+		return nil
+	}
+	return LoadRelations(items, relations...)
 }
 
 // LoadRelations loads defined relationships for a collection of models, Maps, or struct pointers

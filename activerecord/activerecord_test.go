@@ -1,6 +1,7 @@
 package activerecord_test
 
 import (
+	"net/http"
 	"testing"
 	"time"
 
@@ -449,6 +450,20 @@ func TestActiveRecord_EmbeddedStructWithUnexportedFields(t *testing.T) {
 	}
 	if found.Name != "Sample name4" {
 		t.Fatalf("expected department name 'Sample name4', got '%s'", found.Name)
+	}
+}
+
+func TestLoadRelationsFromRequest(t *testing.T) {
+	// Test nil request / items safety
+	if err := activerecord.LoadRelationsFromRequest(nil, nil); err != nil {
+		t.Errorf("expected nil error for nil request/items, got: %v", err)
+	}
+
+	// Test empty with query
+	req, _ := http.NewRequest("GET", "/test", nil)
+	var items []TestArticle
+	if err := activerecord.LoadRelationsFromRequest(req, &items); err != nil {
+		t.Errorf("expected nil error for empty with param, got: %v", err)
 	}
 }
 
