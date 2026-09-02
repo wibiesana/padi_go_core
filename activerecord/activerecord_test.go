@@ -386,3 +386,69 @@ func TestEagerLoading_MapsAndPagination(t *testing.T) {
 		t.Fatalf("expected single post to have user and 2 comments, got user=%+v, comments=%d", singlePost.User, len(singlePost.Comments))
 	}
 }
+
+type TestBaseDepartment struct {
+	activerecord.ActiveRecord
+	ID          uint   `db:"id" json:"id"`
+	Name        string `db:"name" json:"name"`
+	Description string `db:"description" json:"description"`
+	SemesterID  uint   `db:"semester_id" json:"semester_id"`
+	TeacherID   uint   `db:"teacher_id" json:"teacher_id"`
+	Status      int    `db:"status" json:"status"`
+}
+
+type TestDepartment struct {
+	TestBaseDepartment
+}
+
+func (TestDepartment) TableName() string {
+	return "test_departments"
+}
+
+func TestActiveRecord_EmbeddedStructWithUnexportedFields(t *testing.T) {
+	setupTestDB(t)
+	db := database.GetDB()
+	_, err := db.Exec(`
+		CREATE TABLE IF NOT EXISTS test_departments (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			name TEXT NOT NULL,
+			description TEXT,
+			semester_id INTEGER,
+			teacher_id INTEGER,
+			status INTEGER DEFAULT 1
+		);
+	`)
+	if err != nil {
+		t.Fatalf("failed to create test_departments table: %v", err)
+	}
+
+	dept := TestDepartment{
+		TestBaseDepartment: TestBaseDepartment{
+			Name:        "Sample name4",
+			Description: "Sample description",
+			SemesterID:  1,
+			TeacherID:   10,
+			Status:      1,
+		},
+	}
+
+	// Test saving a model that embeds ActiveRecord (which has unexported mutex and fields)
+	err = activerecord.Save(&dept)
+	if err != nil {
+		t.Fatalf("expected Save to succeed for embedded struct with unexported fields, got: %v", err)
+	}
+
+	if dept.ID == 0 {
+		t.Fatalf("expected dept.ID to be populated after insert, got 0")
+	}
+
+	// Test find
+	found, err := activerecord.Find[TestDepartment](dept.ID)
+	if err != nil || found == nil {
+		t.Fatalf("failed to find department: %v", err)
+	}
+	if found.Name != "Sample name4" {
+		t.Fatalf("expected department name 'Sample name4', got '%s'", found.Name)
+	}
+}
+

@@ -2171,6 +2171,9 @@ func getStructTypeInfo(t reflect.Type) *structTypeInfo {
 
 	for i := 0; i < num; i++ {
 		sf := t.Field(i)
+		if !sf.IsExported() && !sf.Anonymous {
+			continue
+		}
 		tagDB := sf.Tag.Get("db")
 		tagJSON := sf.Tag.Get("json")
 		tagRel := sf.Tag.Get("rel")
@@ -2844,11 +2847,24 @@ func queryToMaps(q *query.Query) ([]*Map, error) {
 
 func extractFieldMap(val reflect.Value) map[string]interface{} {
 	fields := make(map[string]interface{})
+	for val.Kind() == reflect.Ptr {
+		if val.IsNil() {
+			return fields
+		}
+		val = val.Elem()
+	}
+	if val.Kind() != reflect.Struct {
+		return fields
+	}
 	typ := val.Type()
 
 	for i := 0; i < val.NumField(); i++ {
-		f := val.Field(i)
 		sf := typ.Field(i)
+		f := val.Field(i)
+
+		if !sf.IsExported() {
+			continue
+		}
 
 		if sf.Anonymous && f.Kind() == reflect.Struct {
 			subMap := extractFieldMap(f)
@@ -2870,7 +2886,9 @@ func extractFieldMap(val reflect.Value) map[string]interface{} {
 		if tag != "" {
 			colName = strings.Split(tag, ",")[0]
 		}
-		fields[strings.ToLower(colName)] = f.Interface()
+		if f.CanInterface() {
+			fields[strings.ToLower(colName)] = f.Interface()
+		}
 	}
 
 	return fields
@@ -2902,10 +2920,23 @@ func setStructID(val reflect.Value, id int64) {
 }
 
 func mapStructFields(val reflect.Value, fieldMap map[string]reflect.Value) {
+	for val.Kind() == reflect.Ptr {
+		if val.IsNil() {
+			return
+		}
+		val = val.Elem()
+	}
+	if val.Kind() != reflect.Struct {
+		return
+	}
 	typ := val.Type()
 	for i := 0; i < val.NumField(); i++ {
-		field := val.Field(i)
 		structField := typ.Field(i)
+		field := val.Field(i)
+
+		if !structField.IsExported() {
+			continue
+		}
 
 		if structField.Anonymous && field.Kind() == reflect.Struct {
 			mapStructFields(field, fieldMap)
