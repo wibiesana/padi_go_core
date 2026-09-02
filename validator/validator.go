@@ -100,3 +100,124 @@ func BindJSON(r *http.Request, target interface{}) (ValidationErrorDetails, erro
 
 	return nil, nil
 }
+
+// Bind decodes request body and validates directly into a typed struct pointer
+func Bind[T any](r *http.Request) (*T, ValidationErrorDetails, error) {
+	var target T
+	errs, err := BindJSON(r, &target)
+	if err != nil {
+		return nil, errs, err
+	}
+	return &target, nil, nil
+}
+
+// FormValidator provides a fluent, procedural validation builder
+type FormValidator struct {
+	data   map[string]interface{}
+	errors ValidationErrorDetails
+}
+
+// New creates a new fluent FormValidator from http.Request or map
+func New(source ...interface{}) *FormValidator {
+	fv := &FormValidator{
+		data:   make(map[string]interface{}),
+		errors: make(ValidationErrorDetails),
+	}
+	if len(source) > 0 {
+		switch s := source[0].(type) {
+		case *http.Request:
+			_ = s.ParseForm()
+			for k, v := range s.Form {
+				if len(v) == 1 {
+					fv.data[k] = v[0]
+				} else if len(v) > 1 {
+					fv.data[k] = v
+				}
+			}
+		case map[string]interface{}:
+			fv.data = s
+		}
+	}
+	return fv
+}
+
+// Set adds a key-value pair to validator
+func (v *FormValidator) Set(key string, val interface{}) *FormValidator {
+	v.data[key] = val
+	return v
+}
+
+// Required ensures fields are present and not empty
+func (v *FormValidator) Required(fields ...string) *FormValidator {
+	for _, f := range fields {
+		val, exists := v.data[f]
+		if !exists || val == nil || fmt.Sprintf("%v", val) == "" {
+			if _, already := v.errors[f]; !already {
+				v.errors[f] = fmt.Sprintf("%s is required", f)
+			}
+		}
+	}
+	return v
+}
+
+// Email ensures fields contain valid email formats
+func (v *FormValidator) Email(fields ...string) *FormValidator {
+	for _, f := range fields {
+		if val, exists := v.data[f]; exists && val != nil {
+			str := fmt.Sprintf("%v", val)
+			if str != "" && (!strings.Contains(str, "@") || !strings.Contains(str, ".")) {
+				if _, already := v.errors[f]; !already {
+					v.errors[f] = fmt.Sprintf("%s must be a valid email address", f)
+				}
+			}
+		}
+	}
+	return v
+}
+
+// Min ensures string length is at least min characters
+func (v *FormValidator) Min(field string, min int) *FormValidator {
+	if val, exists := v.data[field]; exists && val != nil {
+		str := fmt.Sprintf("%v", val)
+		if len(str) < min {
+			if _, already := v.errors[field]; !already {
+				v.errors[field] = fmt.Sprintf("%s must be at least %d characters", field, min)
+			}
+		}
+	}
+	return v
+}
+
+// Max ensures string length is not greater than max characters
+func (v *FormValidator) Max(field string, max int) *FormValidator {
+	if val, exists := v.data[field]; exists && val != nil {
+		str := fmt.Sprintf("%v", val)
+		if len(str) > max {
+			if _, already := v.errors[field]; !already {
+				v.errors[field] = fmt.Sprintf("%s may not be greater than %d characters", field, max)
+			}
+		}
+	}
+	return v
+}
+
+// AddError manually appends an error message for a field
+func (v *FormValidator) AddError(field, message string) *FormValidator {
+	v.errors[field] = message
+	return v
+}
+
+// Passes returns true if there are no validation errors
+func (v *FormValidator) Passes() bool {
+	return len(v.errors) == 0
+}
+
+// Fails returns true if there are validation errors
+func (v *FormValidator) Fails() bool {
+	return len(v.errors) > 0
+}
+
+// Errors returns the validation error map
+func (v *FormValidator) Errors() ValidationErrorDetails {
+	return v.errors
+}

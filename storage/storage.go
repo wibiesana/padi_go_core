@@ -295,3 +295,75 @@ func Delete(relativePath string) error {
 	fullPath := filepath.Join("storage", filepath.Clean(relativePath))
 	return os.Remove(fullPath)
 }
+
+// DiskPath returns the local filesystem path for a relative storage path
+func DiskPath(relativePath string) string {
+	return filepath.Join("storage", filepath.Clean(relativePath))
+}
+
+// Put writes binary content to a storage path
+func Put(relativePath string, content []byte) error {
+	fullPath := DiskPath(relativePath)
+	if err := os.MkdirAll(filepath.Dir(fullPath), 0755); err != nil {
+		return err
+	}
+	return os.WriteFile(fullPath, content, 0644)
+}
+
+// Get reads binary content from a storage path
+func Get(relativePath string) ([]byte, error) {
+	fullPath := DiskPath(relativePath)
+	return os.ReadFile(fullPath)
+}
+
+// Copy copies a file from one storage path to another
+func Copy(srcRelative, destRelative string) error {
+	srcBytes, err := Get(srcRelative)
+	if err != nil {
+		return err
+	}
+	return Put(destRelative, srcBytes)
+}
+
+// Move moves/renames a file from one storage path to another
+func Move(srcRelative, destRelative string) error {
+	srcFull := DiskPath(srcRelative)
+	destFull := DiskPath(destRelative)
+	if err := os.MkdirAll(filepath.Dir(destFull), 0755); err != nil {
+		return err
+	}
+	return os.Rename(srcFull, destFull)
+}
+
+// MakeDirectory creates a directory under storage
+func MakeDirectory(relativePath string) error {
+	fullPath := DiskPath(relativePath)
+	return os.MkdirAll(fullPath, 0755)
+}
+
+// DeleteDirectory recursively removes a directory under storage
+func DeleteDirectory(relativePath string) error {
+	if relativePath == "" || relativePath == "." || relativePath == "/" {
+		return errors.New("cannot delete root storage directory")
+	}
+	fullPath := DiskPath(relativePath)
+	return os.RemoveAll(fullPath)
+}
+
+// List returns a list of relative file paths in a storage directory
+func List(relativePath string) ([]string, error) {
+	fullPath := DiskPath(relativePath)
+	entries, err := os.ReadDir(fullPath)
+	if err != nil {
+		return nil, err
+	}
+
+	var files []string
+	for _, e := range entries {
+		if !e.IsDir() {
+			rel := filepath.ToSlash(filepath.Join(relativePath, e.Name()))
+			files = append(files, strings.TrimPrefix(rel, "/"))
+		}
+	}
+	return files, nil
+}

@@ -6,6 +6,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"math"
 	"reflect"
 	"regexp"
 	"strconv"
@@ -240,6 +241,319 @@ var (
 	BelongsToManyRel = BelongsToMany
 )
 
+// ModelQuery wraps query.Query with generic model awareness and out-of-the-box eager loading
+type ModelQuery[T Model] struct {
+	*query.Query
+	relations []string
+}
+
+// NewModelQuery creates a model-aware query builder
+func NewModelQuery[T Model](db ...*sql.DB) *ModelQuery[T] {
+	var zero T
+	return &ModelQuery[T]{
+		Query: query.New(zero.TableName(), db...),
+	}
+}
+
+// With attaches eager-loaded relation names to the query
+func (mq *ModelQuery[T]) With(relations ...string) *ModelQuery[T] {
+	for _, r := range relations {
+		if strings.Contains(r, ",") && !strings.Contains(r, ":") {
+			parts := strings.Split(r, ",")
+			for _, p := range parts {
+				if trimmed := strings.TrimSpace(p); trimmed != "" {
+					mq.relations = append(mq.relations, trimmed)
+				}
+			}
+		} else if trimmed := strings.TrimSpace(r); trimmed != "" {
+			mq.relations = append(mq.relations, trimmed)
+		}
+	}
+	return mq
+}
+
+// ClearWith clears configured eager loading relations
+func (mq *ModelQuery[T]) ClearWith() *ModelQuery[T] {
+	mq.relations = nil
+	return mq
+}
+
+// GetWith returns currently configured relations
+func (mq *ModelQuery[T]) GetWith() []string {
+	return mq.relations
+}
+
+// Where adds WHERE condition
+func (mq *ModelQuery[T]) Where(column string, args ...interface{}) *ModelQuery[T] {
+	mq.Query.Where(column, args...)
+	return mq
+}
+
+// WhereIn adds WHERE IN condition
+func (mq *ModelQuery[T]) WhereIn(column string, values ...interface{}) *ModelQuery[T] {
+	mq.Query.WhereIn(column, values...)
+	return mq
+}
+
+// WhereNotIn adds WHERE NOT IN condition
+func (mq *ModelQuery[T]) WhereNotIn(column string, values ...interface{}) *ModelQuery[T] {
+	mq.Query.WhereNotIn(column, values...)
+	return mq
+}
+
+// WhereNull adds WHERE NULL condition
+func (mq *ModelQuery[T]) WhereNull(column string) *ModelQuery[T] {
+	mq.Query.WhereNull(column)
+	return mq
+}
+
+// WhereNotNull adds WHERE NOT NULL condition
+func (mq *ModelQuery[T]) WhereNotNull(column string) *ModelQuery[T] {
+	mq.Query.WhereNotNull(column)
+	return mq
+}
+
+// OrWhere adds OR WHERE condition
+func (mq *ModelQuery[T]) OrWhere(column string, args ...interface{}) *ModelQuery[T] {
+	mq.Query.OrWhere(column, args...)
+	return mq
+}
+
+// OrderBy adds ORDER BY clause
+func (mq *ModelQuery[T]) OrderBy(column string, direction ...string) *ModelQuery[T] {
+	mq.Query.OrderBy(column, direction...)
+	return mq
+}
+
+// Limit sets query limit
+func (mq *ModelQuery[T]) Limit(limit int) *ModelQuery[T] {
+	mq.Query.Limit(limit)
+	return mq
+}
+
+// Offset sets query offset
+func (mq *ModelQuery[T]) Offset(offset int) *ModelQuery[T] {
+	mq.Query.Offset(offset)
+	return mq
+}
+
+// Select sets columns to select
+func (mq *ModelQuery[T]) Select(columns ...string) *ModelQuery[T] {
+	mq.Query.Select(columns...)
+	return mq
+}
+
+// Search builds a model-aware multi-column LIKE search
+func (mq *ModelQuery[T]) Search(keyword string, columns ...string) *ModelQuery[T] {
+	mq.Query.Search(keyword, columns...)
+	return mq
+}
+
+// WithContext attaches a context for tracing / telemetry
+func (mq *ModelQuery[T]) WithContext(ctx context.Context) *ModelQuery[T] {
+	mq.Query.WithContext(ctx)
+	return mq
+}
+
+// Get retrieves all matching records and eager-loads configured relations
+func (mq *ModelQuery[T]) Get(columns ...string) ([]T, error) {
+	if len(columns) > 0 {
+		mq.Query.Select(columns...)
+	}
+	var zero T
+	if ord, ok := any(zero).(DefaultOrderer); ok {
+		if d := ord.DefaultOrder(); d != "" {
+			parts := strings.Fields(d)
+			if len(parts) >= 2 {
+				mq.Query.OrderBy(parts[0], parts[1])
+			} else {
+				mq.Query.OrderBy(parts[0], "ASC")
+			}
+		}
+	}
+
+	var records []T
+	err := mq.Query.All(&records)
+	if err != nil {
+		return nil, err
+	}
+
+	if len(mq.relations) > 0 && len(records) > 0 {
+		if err := LoadRelations(&records, mq.relations...); err != nil {
+			return nil, err
+		}
+	}
+
+	for i := range records {
+		if hook, ok := any(&records[i]).(AfterLoader); ok {
+			hook.AfterLoad()
+		}
+	}
+
+	return records, nil
+}
+
+// All is an alias for Get
+func (mq *ModelQuery[T]) All(columns ...string) ([]T, error) {
+	return mq.Get(columns...)
+}
+
+// First retrieves the first matching record and eager-loads configured relations
+func (mq *ModelQuery[T]) First(columns ...string) (*T, error) {
+	if len(columns) > 0 {
+		mq.Query.Select(columns...)
+	}
+	var item T
+	err := mq.Query.First(&item)
+	if err != nil {
+		return nil, err
+	}
+
+	if len(mq.relations) > 0 {
+		if err := LoadRelations(&item, mq.relations...); err != nil {
+			return nil, err
+		}
+	}
+
+	if hook, ok := any(&item).(AfterLoader); ok {
+		hook.AfterLoad()
+	}
+
+	return &item, nil
+}
+
+// One is an alias for First
+func (mq *ModelQuery[T]) One(columns ...string) (*T, error) {
+	return mq.First(columns...)
+}
+
+// Find retrieves a single record by primary key with eager-loading
+func (mq *ModelQuery[T]) Find(id any, columns ...string) (*T, error) {
+	var zero T
+	pkName := GetPrimaryKeyName(zero)
+	mq.Query.Where(pkName, id)
+	return mq.First(columns...)
+}
+
+// FindOrFail retrieves a single record by primary key or returns an error
+func (mq *ModelQuery[T]) FindOrFail(id any, columns ...string) (*T, error) {
+	item, err := mq.Find(id, columns...)
+	if err != nil {
+		return nil, err
+	}
+	if item == nil {
+		var zero T
+		return nil, fmt.Errorf("record not found in %s with id %v", zero.TableName(), id)
+	}
+	return item, nil
+}
+
+// Paginate executes query pagination and eager-loads relations on the page results
+func (mq *ModelQuery[T]) Paginate(opts query.Options, searchColumns ...string) (response.Pagination, []T, error) {
+	var records []T
+	meta, err := mq.Query.Paginate(opts, searchColumns, &records)
+	if err != nil {
+		return response.Pagination{}, nil, err
+	}
+
+	if len(mq.relations) > 0 && len(records) > 0 {
+		if err := LoadRelations(&records, mq.relations...); err != nil {
+			return response.Pagination{}, nil, err
+		}
+	}
+
+	for i := range records {
+		if hook, ok := any(&records[i]).(AfterLoader); ok {
+			hook.AfterLoad()
+		}
+	}
+
+	return meta, records, nil
+}
+
+// GetMaps executes query returning a slice of ordered Maps with eager-loaded relations
+func (mq *ModelQuery[T]) GetMaps(columns ...string) ([]*Map, error) {
+	if len(columns) > 0 {
+		mq.Query.Select(columns...)
+	}
+	maps, err := queryToMaps(mq.Query)
+	if err != nil {
+		return nil, err
+	}
+
+	if len(mq.relations) > 0 && len(maps) > 0 {
+		var zero T
+		if err := LoadRelationsWithModel(maps, zero, mq.relations...); err != nil {
+			return nil, err
+		}
+	}
+
+	return maps, nil
+}
+
+// FirstMap retrieves the first matching row as an ordered Map with eager-loaded relations
+func (mq *ModelQuery[T]) FirstMap(columns ...string) (*Map, error) {
+	mq.Query.Limit(1)
+	maps, err := mq.GetMaps(columns...)
+	if err != nil {
+		return nil, err
+	}
+	if len(maps) == 0 {
+		return nil, sql.ErrNoRows
+	}
+	return maps[0], nil
+}
+
+// PaginateMaps executes pagination returning ordered Maps with eager-loaded relations
+func (mq *ModelQuery[T]) PaginateMaps(opts query.Options, searchColumns ...string) (response.Pagination, []*Map, error) {
+	if opts.Search != "" && len(searchColumns) > 0 {
+		mq.Query.Search(opts.Search, searchColumns...)
+	}
+
+	total, err := mq.Query.Count()
+	if err != nil {
+		return response.Pagination{}, nil, err
+	}
+
+	if opts.Sort != "" {
+		mq.Query.OrderBy(opts.Sort, opts.Order)
+	}
+
+	offset := (opts.Page - 1) * opts.PerPage
+	mq.Query.Limit(opts.PerPage).Offset(offset)
+
+	maps, err := mq.GetMaps()
+	if err != nil {
+		return response.Pagination{}, nil, err
+	}
+
+	lastPage := int(math.Ceil(float64(total) / float64(opts.PerPage)))
+	if lastPage < 1 {
+		lastPage = 1
+	}
+
+	from := offset + 1
+	to := offset + opts.PerPage
+	if int64(to) > total {
+		to = int(total)
+	}
+	if total == 0 {
+		from = 0
+		to = 0
+	}
+
+	meta := response.Pagination{
+		Total:       total,
+		PerPage:     opts.PerPage,
+		CurrentPage: opts.Page,
+		LastPage:    lastPage,
+		From:        from,
+		To:          to,
+	}
+
+	return meta, maps, nil
+}
+
 // GetRelationConfig retrieves relation definition by name from model
 func GetRelationConfig(m Model, name string) *Relation {
 	if rd, ok := m.(RelationDefiner); ok {
@@ -257,22 +571,21 @@ func GetWith(m Model) []string {
 }
 
 // With starts a model-aware query builder with eager loading
-func With[T Model](relations ...string) *query.Query {
-	var zero T
-	return query.New(zero.TableName())
+func With[T Model](relations ...string) *ModelQuery[T] {
+	mq := NewModelQuery[T]()
+	return mq.With(relations...)
 }
 
 // ClearWith clears eager loading configuration
 func ClearWith() {}
 
 // FindBuilder starts a new model query builder
-func FindBuilder[T Model]() *query.Query {
-	var zero T
-	return query.New(zero.TableName())
+func FindBuilder[T Model]() *ModelQuery[T] {
+	return NewModelQuery[T]()
 }
 
 // FindQuery is alias for FindBuilder
-func FindQuery[T Model]() *query.Query {
+func FindQuery[T Model]() *ModelQuery[T] {
 	return FindBuilder[T]()
 }
 
@@ -357,24 +670,7 @@ func FindByPk[T Model](id interface{}, columns ...string) (*T, error) {
 
 // FindByPkWithContext retrieves record by primary key with context
 func FindByPkWithContext[T Model](ctx context.Context, id interface{}, columns ...string) (*T, error) {
-	var item T
-	pkName := GetPrimaryKeyName(item)
-	q := query.New(item.TableName())
-	if ctx != nil {
-		q.WithContext(ctx)
-	}
-	if len(columns) > 0 {
-		q.Select(columns...)
-	}
-
-	err := q.Where(pkName, id).First(&item)
-	if err != nil {
-		return nil, err
-	}
-	if hook, ok := any(&item).(AfterLoader); ok {
-		hook.AfterLoad()
-	}
-	return &item, nil
+	return NewModelQuery[T]().WithContext(ctx).Find(id, columns...)
 }
 
 // FindOne finds a single record by ID or conditions
@@ -485,35 +781,7 @@ func All[T Model](columns ...string) ([]T, error) {
 
 // AllWithContext retrieves all records for the model with context
 func AllWithContext[T Model](ctx context.Context, columns ...string) ([]T, error) {
-	var zero T
-	var records []T
-	q := query.New(zero.TableName())
-	if ctx != nil {
-		q.WithContext(ctx)
-	}
-	if len(columns) > 0 {
-		q.Select(columns...)
-	}
-	if ord, ok := any(zero).(DefaultOrderer); ok {
-		if d := ord.DefaultOrder(); d != "" {
-			parts := strings.Fields(d)
-			if len(parts) >= 2 {
-				q.OrderBy(parts[0], parts[1])
-			} else {
-				q.OrderBy(parts[0], "ASC")
-			}
-		}
-	}
-	err := q.All(&records)
-	if err != nil {
-		return nil, err
-	}
-	for i := range records {
-		if hook, ok := any(&records[i]).(AfterLoader); ok {
-			hook.AfterLoad()
-		}
-	}
-	return records, nil
+	return NewModelQuery[T]().WithContext(ctx).Get(columns...)
 }
 
 // Get retrieves all records with eager-loading if configured
@@ -561,23 +829,7 @@ func Paginate[T Model](opts query.Options, searchColumns ...string) (response.Pa
 
 // PaginateWithContext executes query pagination for model with context
 func PaginateWithContext[T Model](ctx context.Context, opts query.Options, searchColumns ...string) (response.Pagination, []T, error) {
-	var zero T
-	var records []T
-	q := query.New(zero.TableName())
-	if ctx != nil {
-		q.WithContext(ctx)
-	}
-
-	meta, err := q.Paginate(opts, searchColumns, &records)
-	if err != nil {
-		return response.Pagination{}, nil, err
-	}
-	for i := range records {
-		if hook, ok := any(&records[i]).(AfterLoader); ok {
-			hook.AfterLoad()
-		}
-	}
-	return meta, records, nil
+	return NewModelQuery[T]().WithContext(ctx).Paginate(opts, searchColumns...)
 }
 
 // PaginateWithConditions paginates with custom conditions and ordering
@@ -1673,13 +1925,896 @@ func FindRelation(table string, id any, displayCol ...string) (*Map, any) {
 	return nil, nil
 }
 
-// LoadRelations loads defined relations for a collection of models
+// RelationContainer allows a model struct to store and retrieve preloaded relations dynamically
+type RelationContainer interface {
+	GetRelation(name string) (any, bool)
+	SetRelation(name string, val any)
+	RelationsMap() map[string]any
+}
+
+// ActiveRecord provides Base struct embedding for models with dynamic relation storage
+type ActiveRecord struct {
+	relationsMu *sync.RWMutex
+	relations   map[string]any
+}
+
+func (a *ActiveRecord) initMu() {
+	if a.relationsMu == nil {
+		a.relationsMu = &sync.RWMutex{}
+	}
+}
+
+// SetRelation stores an eager-loaded or lazy-loaded relation on the model instance
+func (a *ActiveRecord) SetRelation(name string, val any) {
+	if a == nil {
+		return
+	}
+	a.initMu()
+	a.relationsMu.Lock()
+	defer a.relationsMu.Unlock()
+	if a.relations == nil {
+		a.relations = make(map[string]any)
+	}
+	a.relations[name] = val
+}
+
+// GetRelation retrieves a relation by name from the model instance
+func (a *ActiveRecord) GetRelation(name string) (any, bool) {
+	if a == nil || a.relationsMu == nil {
+		return nil, false
+	}
+	a.relationsMu.RLock()
+	defer a.relationsMu.RUnlock()
+	if a.relations == nil {
+		return nil, false
+	}
+	val, ok := a.relations[name]
+	return val, ok
+}
+
+// RelationsMap returns a copy of all loaded relations on this model instance
+func (a *ActiveRecord) RelationsMap() map[string]any {
+	if a == nil || a.relationsMu == nil {
+		return nil
+	}
+	a.relationsMu.RLock()
+	defer a.relationsMu.RUnlock()
+	if a.relations == nil {
+		return nil
+	}
+	cp := make(map[string]any, len(a.relations))
+	for k, v := range a.relations {
+		cp[k] = v
+	}
+	return cp
+}
+
+type relationSpec struct {
+	name    string
+	columns []string
+	nested  []string
+}
+
+func parseRelationSpecs(relations []string) map[string]*relationSpec {
+	grouped := make(map[string]*relationSpec)
+	var flat []string
+	for _, r := range relations {
+		r = strings.TrimSpace(r)
+		if r == "" {
+			continue
+		}
+		if strings.Contains(r, ",") && !strings.Contains(r, ":") {
+			for _, part := range strings.Split(r, ",") {
+				if p := strings.TrimSpace(part); p != "" {
+					flat = append(flat, p)
+				}
+			}
+		} else {
+			flat = append(flat, r)
+		}
+	}
+
+	for _, item := range flat {
+		base := item
+		var nestedPart string
+		var columnsPart string
+
+		if idx := strings.Index(base, "."); idx != -1 {
+			nestedPart = base[idx+1:]
+			base = base[:idx]
+		}
+		if idx := strings.Index(base, ":"); idx != -1 {
+			columnsPart = base[idx+1:]
+			base = base[:idx]
+		}
+
+		base = strings.TrimSpace(base)
+		if base == "" {
+			continue
+		}
+
+		spec, exists := grouped[base]
+		if !exists {
+			spec = &relationSpec{name: base}
+			grouped[base] = spec
+		}
+
+		if columnsPart != "" {
+			for _, c := range strings.Split(columnsPart, ",") {
+				if col := strings.TrimSpace(c); col != "" {
+					spec.columns = append(spec.columns, col)
+				}
+			}
+		}
+		if nestedPart != "" {
+			spec.nested = append(spec.nested, nestedPart)
+		}
+	}
+	return grouped
+}
+
+// RelationItem provides a uniform interface for reading and writing relations on maps or structs
+type RelationItem interface {
+	Get(key string) (any, bool)
+	Set(key string, val any)
+	Model() Model
+}
+
+type mapRelationItem struct {
+	m     *Map
+	model Model
+}
+
+func (i *mapRelationItem) Get(key string) (any, bool) {
+	if i.m == nil {
+		return nil, false
+	}
+	if val, ok := i.m.Get(key); ok {
+		return val, true
+	}
+	lower := strings.ToLower(key)
+	for _, k := range i.m.Keys() {
+		if strings.ToLower(k) == lower {
+			return i.m.Get(k)
+		}
+	}
+	return nil, false
+}
+
+func (i *mapRelationItem) Set(key string, val any) {
+	if i.m != nil {
+		i.m.Set(key, val)
+	}
+}
+
+func (i *mapRelationItem) Model() Model {
+	return i.model
+}
+
+type structRelationItem struct {
+	val   reflect.Value
+	model Model
+}
+
+type structFieldInfo struct {
+	index     int
+	name      string
+	lowerName string
+	colName   string
+	tagRel    string
+	isAnon    bool
+}
+
+type structTypeInfo struct {
+	fields      []structFieldInfo
+	byLowerName map[string]int
+	anonIndices []int
+}
+
+var (
+	structTypeCache   = make(map[reflect.Type]*structTypeInfo)
+	structTypeCacheMu sync.RWMutex
+)
+
+func getStructTypeInfo(t reflect.Type) *structTypeInfo {
+	if t.Kind() == reflect.Ptr {
+		t = t.Elem()
+	}
+	if t.Kind() != reflect.Struct {
+		return nil
+	}
+
+	structTypeCacheMu.RLock()
+	if info, ok := structTypeCache[t]; ok {
+		structTypeCacheMu.RUnlock()
+		return info
+	}
+	structTypeCacheMu.RUnlock()
+
+	structTypeCacheMu.Lock()
+	defer structTypeCacheMu.Unlock()
+	if info, ok := structTypeCache[t]; ok {
+		return info
+	}
+
+	num := t.NumField()
+	info := &structTypeInfo{
+		fields:      make([]structFieldInfo, num),
+		byLowerName: make(map[string]int, num*3),
+	}
+
+	for i := 0; i < num; i++ {
+		sf := t.Field(i)
+		tagDB := sf.Tag.Get("db")
+		tagJSON := sf.Tag.Get("json")
+		tagRel := sf.Tag.Get("rel")
+
+		colName := sf.Name
+		if tagDB != "" && tagDB != "-" {
+			colName = strings.Split(tagDB, ",")[0]
+		} else if tagJSON != "" && tagJSON != "-" {
+			colName = strings.Split(tagJSON, ",")[0]
+		}
+
+		isAnonStruct := sf.Anonymous && sf.Type.Kind() == reflect.Struct
+		if isAnonStruct {
+			info.anonIndices = append(info.anonIndices, i)
+		}
+
+		fInfo := structFieldInfo{
+			index:     i,
+			name:      sf.Name,
+			lowerName: strings.ToLower(sf.Name),
+			colName:   strings.ToLower(colName),
+			tagRel:    strings.ToLower(tagRel),
+			isAnon:    isAnonStruct,
+		}
+		info.fields[i] = fInfo
+
+		info.byLowerName[fInfo.lowerName] = i
+		info.byLowerName[fInfo.colName] = i
+		if fInfo.tagRel != "" {
+			info.byLowerName[fInfo.tagRel] = i
+		}
+	}
+
+	structTypeCache[t] = info
+	return info
+}
+
+func buildInPlaceholders(driver string, count int) string {
+	if count <= 0 {
+		return ""
+	}
+	if driver == "postgres" {
+		var sb strings.Builder
+		sb.Grow(count * 4)
+		for i := 1; i <= count; i++ {
+			if i > 1 {
+				sb.WriteString(", ")
+			}
+			sb.WriteString("$")
+			sb.WriteString(strconv.Itoa(i))
+		}
+		return sb.String()
+	}
+
+	if count == 1 {
+		return "?"
+	}
+	var sb strings.Builder
+	sb.Grow(count*3 - 2)
+	for i := 0; i < count; i++ {
+		if i > 0 {
+			sb.WriteString(", ?")
+		} else {
+			sb.WriteString("?")
+		}
+	}
+	return sb.String()
+}
+
+func (i *structRelationItem) Get(key string) (any, bool) {
+	v := i.val
+	if v.Kind() == reflect.Ptr {
+		v = v.Elem()
+	}
+	if v.Kind() != reflect.Struct {
+		return nil, false
+	}
+
+	lower := strings.ToLower(key)
+	return findStructFieldValue(v, lower)
+}
+
+func findStructFieldValue(val reflect.Value, lowerKey string) (any, bool) {
+	info := getStructTypeInfo(val.Type())
+	if info == nil {
+		return nil, false
+	}
+
+	if idx, ok := info.byLowerName[lowerKey]; ok {
+		return val.Field(idx).Interface(), true
+	}
+
+	for _, anonIdx := range info.anonIndices {
+		if v, ok := findStructFieldValue(val.Field(anonIdx), lowerKey); ok {
+			return v, true
+		}
+	}
+
+	return nil, false
+}
+
+func (i *structRelationItem) Set(key string, val any) {
+	v := i.val
+	if v.Kind() == reflect.Ptr {
+		v = v.Elem()
+	}
+	if v.Kind() != reflect.Struct {
+		return
+	}
+
+	assignRelationToStruct(v, key, val)
+
+	if v.CanAddr() {
+		if rc, ok := v.Addr().Interface().(RelationContainer); ok {
+			rc.SetRelation(key, val)
+		}
+	}
+}
+
+func (i *structRelationItem) Model() Model {
+	return i.model
+}
+
+var (
+	modelRegistry   = make(map[string]Model)
+	modelRegistryMu sync.RWMutex
+)
+
+// RegisterModel registers a model for relationship discovery
+func RegisterModel(m Model) {
+	if m == nil {
+		return
+	}
+	modelRegistryMu.Lock()
+	defer modelRegistryMu.Unlock()
+	modelRegistry[m.TableName()] = m
+}
+
+func getRegisteredModel(tableName string) Model {
+	modelRegistryMu.RLock()
+	defer modelRegistryMu.RUnlock()
+	return modelRegistry[tableName]
+}
+
+func assignRelationToStruct(val reflect.Value, relName string, relVal any) {
+	if !val.CanSet() && val.Kind() != reflect.Ptr {
+		return
+	}
+	if val.Kind() == reflect.Ptr {
+		val = val.Elem()
+	}
+	if val.Kind() != reflect.Struct {
+		return
+	}
+
+	info := getStructTypeInfo(val.Type())
+	if info == nil {
+		return
+	}
+
+	lower := strings.ToLower(relName)
+	idx, found := info.byLowerName[lower]
+	if !found {
+		for _, anonIdx := range info.anonIndices {
+			assignRelationToStruct(val.Field(anonIdx), relName, relVal)
+		}
+		return
+	}
+
+	f := val.Field(idx)
+	if !f.CanSet() {
+		return
+	}
+
+	if relVal == nil {
+		f.Set(reflect.Zero(f.Type()))
+		return
+	}
+
+	if singleMap, ok := relVal.(*Map); ok {
+		if f.Kind() == reflect.Ptr && f.Type().Elem().Kind() == reflect.Struct {
+			newStructPtr := reflect.New(f.Type().Elem())
+			setStructFieldsFromMap(newStructPtr.Elem(), singleMap.ToMap())
+			for _, k := range singleMap.Keys() {
+				if childVal, ok := singleMap.Get(k); ok {
+					assignRelationToStruct(newStructPtr.Elem(), k, childVal)
+				}
+			}
+			f.Set(newStructPtr)
+			return
+		} else if f.Kind() == reflect.Struct {
+			setStructFieldsFromMap(f, singleMap.ToMap())
+			for _, k := range singleMap.Keys() {
+				if childVal, ok := singleMap.Get(k); ok {
+					assignRelationToStruct(f, k, childVal)
+				}
+			}
+			return
+		} else if f.Kind() == reflect.Interface || f.Type() == reflect.TypeOf((*Map)(nil)) {
+			f.Set(reflect.ValueOf(singleMap))
+			return
+		}
+	}
+
+	if mapSlice, ok := relVal.([]*Map); ok {
+		if f.Kind() == reflect.Slice {
+			elemType := f.Type().Elem()
+			newSlice := reflect.MakeSlice(f.Type(), len(mapSlice), len(mapSlice))
+
+			for i, m := range mapSlice {
+				if elemType.Kind() == reflect.Ptr && elemType.Elem().Kind() == reflect.Struct {
+					elemPtr := reflect.New(elemType.Elem())
+					setStructFieldsFromMap(elemPtr.Elem(), m.ToMap())
+					for _, k := range m.Keys() {
+						if childVal, ok := m.Get(k); ok {
+							assignRelationToStruct(elemPtr.Elem(), k, childVal)
+						}
+					}
+					newSlice.Index(i).Set(elemPtr)
+				} else if elemType.Kind() == reflect.Struct {
+					elemVal := reflect.New(elemType).Elem()
+					setStructFieldsFromMap(elemVal, m.ToMap())
+					for _, k := range m.Keys() {
+						if childVal, ok := m.Get(k); ok {
+							assignRelationToStruct(elemVal, k, childVal)
+						}
+					}
+					newSlice.Index(i).Set(elemVal)
+				} else if elemType == reflect.TypeOf((*Map)(nil)) {
+					newSlice.Index(i).Set(reflect.ValueOf(m))
+				} else if elemType.Kind() == reflect.Interface {
+					newSlice.Index(i).Set(reflect.ValueOf(m))
+				}
+			}
+			f.Set(newSlice)
+			return
+		} else if f.Kind() == reflect.Interface {
+			f.Set(reflect.ValueOf(mapSlice))
+			return
+		}
+	}
+}
+
+// LoadRelations loads defined relationships for a collection of models, Maps, or struct pointers
 func LoadRelations(items interface{}, relations ...string) error {
+	return LoadRelationsWithModel(items, nil, relations...)
+}
+
+// LoadRelationsWithModel loads defined relations using parent model context
+func LoadRelationsWithModel(items interface{}, parentModel Model, relations ...string) error {
+	if items == nil || len(relations) == 0 {
+		return nil
+	}
+
+	wrappedItems, model, err := extractRelationItems(items, parentModel)
+	if err != nil || len(wrappedItems) == 0 {
+		return err
+	}
+
+	return executeLoadRelations(wrappedItems, model, relations)
+}
+
+func extractRelationItems(items interface{}, parentModel Model) ([]RelationItem, Model, error) {
+	var result []RelationItem
+	model := parentModel
+
+	if m, ok := items.(*Map); ok {
+		if m == nil {
+			return nil, model, nil
+		}
+		return []RelationItem{&mapRelationItem{m: m, model: model}}, model, nil
+	}
+
+	if maps, ok := items.([]*Map); ok {
+		for _, m := range maps {
+			if m != nil {
+				result = append(result, &mapRelationItem{m: m, model: model})
+			}
+		}
+		return result, model, nil
+	}
+
+	if mdl, ok := items.(Model); ok {
+		if model == nil {
+			model = mdl
+		}
+	}
+
+	rv := reflect.ValueOf(items)
+	if rv.Kind() == reflect.Ptr {
+		if rv.IsNil() {
+			return nil, model, nil
+		}
+		elem := rv.Elem()
+		if elem.Kind() == reflect.Slice {
+			elemType := elem.Type().Elem()
+			if model == nil {
+				if elemType.Implements(reflect.TypeOf((*Model)(nil)).Elem()) {
+					model = reflect.New(elemType).Elem().Interface().(Model)
+				} else if elemType.Kind() == reflect.Ptr && elemType.Elem().Implements(reflect.TypeOf((*Model)(nil)).Elem()) {
+					model = reflect.New(elemType.Elem()).Interface().(Model)
+				}
+			}
+
+			for i := 0; i < elem.Len(); i++ {
+				itemVal := elem.Index(i)
+				if itemVal.Kind() == reflect.Ptr {
+					if !itemVal.IsNil() {
+						result = append(result, &structRelationItem{val: itemVal, model: model})
+					}
+				} else if itemVal.CanAddr() {
+					result = append(result, &structRelationItem{val: itemVal.Addr(), model: model})
+				} else {
+					result = append(result, &structRelationItem{val: itemVal, model: model})
+				}
+			}
+			return result, model, nil
+		} else if elem.Kind() == reflect.Struct {
+			if model == nil {
+				if mdl, ok := rv.Interface().(Model); ok {
+					model = mdl
+				}
+			}
+			result = append(result, &structRelationItem{val: rv, model: model})
+			return result, model, nil
+		}
+	} else if rv.Kind() == reflect.Slice {
+		elemType := rv.Type().Elem()
+		if model == nil {
+			if elemType.Implements(reflect.TypeOf((*Model)(nil)).Elem()) {
+				model = reflect.New(elemType).Elem().Interface().(Model)
+			} else if elemType.Kind() == reflect.Ptr && elemType.Elem().Implements(reflect.TypeOf((*Model)(nil)).Elem()) {
+				model = reflect.New(elemType.Elem()).Interface().(Model)
+			}
+		}
+
+		for i := 0; i < rv.Len(); i++ {
+			itemVal := rv.Index(i)
+			if itemVal.Kind() == reflect.Ptr {
+				if !itemVal.IsNil() {
+					result = append(result, &structRelationItem{val: itemVal, model: model})
+				}
+			} else if itemVal.CanAddr() {
+				result = append(result, &structRelationItem{val: itemVal.Addr(), model: model})
+			} else {
+				result = append(result, &structRelationItem{val: itemVal, model: model})
+			}
+		}
+		return result, model, nil
+	}
+
+	return result, model, nil
+}
+
+func executeLoadRelations(items []RelationItem, model Model, relations []string) error {
+	if len(items) == 0 || len(relations) == 0 {
+		return nil
+	}
+
+	db := database.GetDB()
+	if db == nil {
+		return fmt.Errorf("database connection is nil")
+	}
+	driver := database.GetDriver()
+
+	specs := parseRelationSpecs(relations)
+
+	var relDefMap map[string]Relation
+	if model != nil {
+		if rd, ok := model.(RelationDefiner); ok {
+			relDefMap = rd.Relations()
+		}
+	}
+
+	for relName, spec := range specs {
+		var relConfig Relation
+		if cfg, exists := relDefMap[relName]; exists {
+			relConfig = cfg
+		} else {
+			relConfig = inferRelationConfig(model, relName)
+		}
+
+		if relConfig.Table == "" {
+			continue
+		}
+
+		switch relConfig.Type {
+		case RelBelongsTo, RelHasOne, RelHasMany:
+			localKey := relConfig.LocalKey
+			if localKey == "" {
+				localKey = "id"
+			}
+			foreignKey := relConfig.ForeignKey
+			if foreignKey == "" {
+				foreignKey = "id"
+			}
+
+			var ids []interface{}
+			seen := make(map[string]bool)
+			for _, item := range items {
+				if val, ok := item.Get(localKey); ok && !isNilOrZero(val) {
+					strVal := fmt.Sprintf("%v", val)
+					if !seen[strVal] {
+						seen[strVal] = true
+						ids = append(ids, val)
+					}
+				}
+			}
+
+			if len(ids) == 0 {
+				for _, item := range items {
+					if relConfig.Type == RelHasMany {
+						item.Set(relName, []*Map{})
+					} else {
+						item.Set(relName, nil)
+					}
+				}
+				continue
+			}
+
+			selectCols := []string{"*"}
+			if len(spec.columns) > 0 {
+				selectCols = append([]string(nil), spec.columns...)
+				hasFK := false
+				for _, sc := range selectCols {
+					if strings.EqualFold(sc, foreignKey) || sc == "*" {
+						hasFK = true
+						break
+					}
+				}
+				if !hasFK {
+					selectCols = append(selectCols, foreignKey)
+				}
+			}
+
+			querySQL := fmt.Sprintf("SELECT %s FROM %s WHERE %s IN (%s)",
+				strings.Join(selectCols, ", "),
+				relConfig.Table,
+				foreignKey,
+				buildInPlaceholders(driver, len(ids)),
+			)
+
+			start := time.Now()
+			rows, err := db.Query(querySQL, ids...)
+			database.TrackQuery(context.TODO(), querySQL, ids, time.Since(start))
+			if err != nil {
+				return err
+			}
+
+			relatedMaps, err := rowsToMaps(rows)
+			rows.Close()
+			if err != nil {
+				return err
+			}
+
+			if len(spec.nested) > 0 && len(relatedMaps) > 0 {
+				childModel := getRegisteredModel(relConfig.Table)
+				if err := LoadRelationsWithModel(relatedMaps, childModel, spec.nested...); err != nil {
+					return err
+				}
+			}
+
+			relatedGroup := make(map[string][]*Map, len(relatedMaps))
+			for _, rm := range relatedMaps {
+				if fkVal, ok := rm.Get(foreignKey); ok {
+					keyStr := fmt.Sprintf("%v", fkVal)
+					relatedGroup[keyStr] = append(relatedGroup[keyStr], rm)
+				}
+			}
+
+			for _, item := range items {
+				if lkVal, ok := item.Get(localKey); ok && !isNilOrZero(lkVal) {
+					keyStr := fmt.Sprintf("%v", lkVal)
+					matched := relatedGroup[keyStr]
+					if relConfig.Type == RelBelongsTo || relConfig.Type == RelHasOne {
+						if len(matched) > 0 {
+							item.Set(relName, matched[0])
+						} else {
+							item.Set(relName, nil)
+						}
+					} else {
+						if matched == nil {
+							matched = []*Map{}
+						}
+						item.Set(relName, matched)
+					}
+				} else {
+					if relConfig.Type == RelHasMany {
+						item.Set(relName, []*Map{})
+					} else {
+						item.Set(relName, nil)
+					}
+				}
+			}
+
+		case RelBelongsToMany:
+			pivotTable := relConfig.PivotTable
+			foreignKey := relConfig.ForeignKey
+			relatedKey := relConfig.RelatedKey
+			relatedTable := relConfig.Table
+			localKey := relConfig.LocalKey
+			if localKey == "" {
+				localKey = "id"
+			}
+
+			var ids []interface{}
+			seen := make(map[string]bool)
+			for _, item := range items {
+				if val, ok := item.Get(localKey); ok && !isNilOrZero(val) {
+					strVal := fmt.Sprintf("%v", val)
+					if !seen[strVal] {
+						seen[strVal] = true
+						ids = append(ids, val)
+					}
+				}
+			}
+
+			if len(ids) == 0 {
+				for _, item := range items {
+					item.Set(relName, []*Map{})
+				}
+				continue
+			}
+
+			selectStr := "rt.*"
+			if len(spec.columns) > 0 {
+				var qCols []string
+				for _, c := range spec.columns {
+					qCols = append(qCols, fmt.Sprintf("rt.%s", c))
+				}
+				selectStr = strings.Join(qCols, ", ")
+			}
+
+			querySQL := fmt.Sprintf("SELECT pt.%s AS _pivot_key, %s FROM %s pt JOIN %s rt ON pt.%s = rt.id WHERE pt.%s IN (%s)",
+				foreignKey,
+				selectStr,
+				pivotTable,
+				relatedTable,
+				relatedKey,
+				foreignKey,
+				buildInPlaceholders(driver, len(ids)),
+			)
+
+			start := time.Now()
+			rows, err := db.Query(querySQL, ids...)
+			database.TrackQuery(context.TODO(), querySQL, ids, time.Since(start))
+			if err != nil {
+				return err
+			}
+
+			relatedMaps, err := rowsToMaps(rows)
+			rows.Close()
+			if err != nil {
+				return err
+			}
+
+			if len(spec.nested) > 0 && len(relatedMaps) > 0 {
+				childModel := getRegisteredModel(relatedTable)
+				if err := LoadRelationsWithModel(relatedMaps, childModel, spec.nested...); err != nil {
+					return err
+				}
+			}
+
+			relatedGroup := make(map[string][]*Map, len(relatedMaps))
+			for _, rm := range relatedMaps {
+				if pivotVal, ok := rm.Get("_pivot_key"); ok {
+					keyStr := fmt.Sprintf("%v", pivotVal)
+					rmCopy := NewMap()
+					for _, k := range rm.Keys() {
+						if k != "_pivot_key" {
+							v, _ := rm.Get(k)
+							rmCopy.Set(k, v)
+						}
+					}
+					relatedGroup[keyStr] = append(relatedGroup[keyStr], rmCopy)
+				}
+			}
+
+			for _, item := range items {
+				if lkVal, ok := item.Get(localKey); ok && !isNilOrZero(lkVal) {
+					keyStr := fmt.Sprintf("%v", lkVal)
+					matched := relatedGroup[keyStr]
+					if matched == nil {
+						matched = []*Map{}
+					}
+					item.Set(relName, matched)
+				} else {
+					item.Set(relName, []*Map{})
+				}
+			}
+		}
+	}
+
 	return nil
 }
 
-// ActiveRecord provides Base struct embedding for models
-type ActiveRecord struct{}
+func inferRelationConfig(model Model, relName string) Relation {
+	parentTable := ""
+	if model != nil {
+		parentTable = model.TableName()
+	}
+
+	lower := strings.ToLower(relName)
+	if strings.HasSuffix(lower, "s") {
+		fk := "id"
+		if parentTable != "" {
+			parentSingular := strings.TrimSuffix(parentTable, "s")
+			fk = parentSingular + "_id"
+		} else {
+			fk = strings.TrimSuffix(lower, "s") + "_id"
+		}
+		return HasMany(lower, fk, "id")
+	}
+
+	targetTable := lower + "s"
+	if strings.HasSuffix(lower, "y") {
+		targetTable = strings.TrimSuffix(lower, "y") + "ies"
+	}
+	return BelongsTo(targetTable, lower+"_id", "id")
+}
+
+func rowsToMaps(rows *sql.Rows) ([]*Map, error) {
+	cols, err := rows.Columns()
+	if err != nil {
+		return nil, err
+	}
+
+	var results []*Map
+	for rows.Next() {
+		values := make([]interface{}, len(cols))
+		scanArgs := make([]interface{}, len(cols))
+		for i := range values {
+			scanArgs[i] = &values[i]
+		}
+
+		if err := rows.Scan(scanArgs...); err != nil {
+			return nil, err
+		}
+
+		m := NewMap()
+		for i, c := range cols {
+			v := values[i]
+			if b, ok := v.([]byte); ok {
+				m.Set(c, string(b))
+			} else {
+				m.Set(c, v)
+			}
+		}
+		results = append(results, m)
+	}
+	return results, rows.Err()
+}
+
+func queryToMaps(q *query.Query) ([]*Map, error) {
+	querySQL, args := q.BuildSQL()
+	db := database.GetDB()
+	if db == nil {
+		return nil, fmt.Errorf("database connection is nil")
+	}
+
+	start := time.Now()
+	rows, err := db.Query(querySQL, args...)
+	database.TrackQuery(context.TODO(), querySQL, args, time.Since(start))
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	return rowsToMaps(rows)
+}
 
 func extractFieldMap(val reflect.Value) map[string]interface{} {
 	fields := make(map[string]interface{})

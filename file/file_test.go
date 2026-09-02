@@ -47,4 +47,22 @@ func TestFilePackageWrappers(t *testing.T) {
 	if !file.Exists(relPath) {
 		t.Errorf("Expected uploaded file to exist via file.Exists")
 	}
+
+	// 3. Test PutString and GetString
+	textPath := "docs/readme.txt"
+	if err := file.PutString(textPath, "Hello Padi"); err != nil {
+		t.Fatalf("file.PutString failed: %v", err)
+	}
+	defer file.Delete(textPath)
+
+	strContent, err := file.GetString(textPath)
+	if err != nil || strContent != "Hello Padi" {
+		t.Fatalf("file.GetString failed: got %s, err %v", strContent, err)
+	}
+
+	// 4. Test SanitizeFileName
+	sanitized := file.SanitizeFileName("../../etc/passwd.jpg")
+	if sanitized != "passwd.jpg" {
+		t.Errorf("SanitizeFileName failed: got %s", sanitized)
+	}
 }

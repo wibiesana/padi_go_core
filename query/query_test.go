@@ -128,4 +128,15 @@ func TestQueryBuilder(t *testing.T) {
 	if err != nil || rowsDeleted != 1 {
 		t.Fatalf("failed delete query")
 	}
+
+	// 6. Test GetAll & GetFirst generics
+	items, err := query.GetAll[Product](query.New("products"))
+	if err != nil || len(items) != 1 {
+		t.Fatalf("query.GetAll failed: %v", err)
+	}
+
+	firstItem, err := query.GetFirst[Product](query.New("products").Where("id", id1))
+	if err != nil || firstItem.Name != "Laptop" {
+		t.Fatalf("query.GetFirst failed: %v", err)
+	}
 }

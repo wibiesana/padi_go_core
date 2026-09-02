@@ -1,6 +1,7 @@
 package database
 
 import (
+	"context"
 	"database/sql"
 	"fmt"
 	"log"
@@ -182,4 +183,96 @@ func GetDriver() string {
 		return "sqlite"
 	}
 	return driver
+}
+
+// Transaction executes operations within a database transaction with automatic commit/rollback
+func Transaction(fn func(tx *sql.Tx) error) error {
+	return TransactionContext(context.Background(), fn)
+}
+
+// TransactionContext executes operations within a transaction with context and automatic commit/rollback
+func TransactionContext(ctx context.Context, fn func(tx *sql.Tx) error) error {
+	db := GetDB()
+	tx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+
+	defer func() {
+		if p := recover(); p != nil {
+			_ = tx.Rollback()
+			panic(p)
+		}
+	}()
+
+	if err := fn(tx); err != nil {
+		_ = tx.Rollback()
+		return err
+	}
+
+	return tx.Commit()
+}
+
+// Exec executes a raw SQL query with query telemetry tracking
+func Exec(query string, args ...interface{}) (sql.Result, error) {
+	return ExecContext(context.Background(), query, args...)
+}
+
+// ExecContext executes a raw SQL query with context and query telemetry tracking
+func ExecContext(ctx context.Context, query string, args ...interface{}) (sql.Result, error) {
+	db := GetDB()
+	start := time.Now()
+	res, err := db.ExecContext(ctx, query, args...)
+	TrackQuery(ctx, query, args, time.Since(start))
+	return res, err
+}
+
+// Query executes a query returning rows with query telemetry tracking
+func Query(query string, args ...interface{}) (*sql.Rows, error) {
+	return QueryContext(context.Background(), query, args...)
+}
+
+// QueryContext executes a query returning rows with context and query telemetry tracking
+func QueryContext(ctx context.Context, query string, args ...interface{}) (*sql.Rows, error) {
+	db := GetDB()
+	start := time.Now()
+	rows, err := db.QueryContext(ctx, query, args...)
+	TrackQuery(ctx, query, args, time.Since(start))
+	return rows, err
+}
+
+// QueryRow executes a query returning a single row with query telemetry tracking
+func QueryRow(query string, args ...interface{}) *sql.Row {
+	return QueryRowContext(context.Background(), query, args...)
+}
+
+// QueryRowContext executes a query returning a single row with context and query telemetry tracking
+func QueryRowContext(ctx context.Context, query string, args ...interface{}) *sql.Row {
+	db := GetDB()
+	start := time.Now()
+	row := db.QueryRowContext(ctx, query, args...)
+	TrackQuery(ctx, query, args, time.Since(start))
+	return row
+}
+
+// Ping checks if the database connection is alive
+func Ping() error {
+	return GetDB().Ping()
+}
+
+// Close gracefully closes the primary database connection
+func Close() error {
+	mu.Lock()
+	defer mu.Unlock()
+	if DB != nil {
+		err := DB.Close()
+		DB = nil
+		return err
+	}
+	return nil
+}
+
+// Stats returns database connection pool statistics
+func Stats() sql.DBStats {
+	return GetDB().Stats()
 }

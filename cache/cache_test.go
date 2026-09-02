@@ -95,4 +95,33 @@ func TestCacheV002Enhancements(t *testing.T) {
 
 	// 5. Test Cleanup()
 	_ = cache.Cleanup()
+
+	// 6. Test GetTyped & RememberTyped
+	typedKey := "typed_user_test"
+	type UserInfo struct {
+		ID   int    `json:"id"`
+		Name string `json:"name"`
+	}
+
+	u, err := cache.RememberTyped(typedKey, time.Minute, func() (UserInfo, error) {
+		return UserInfo{ID: 101, Name: "Bob"}, nil
+	})
+	if err != nil || u.ID != 101 || u.Name != "Bob" {
+		t.Fatalf("RememberTyped failed: %v", err)
+	}
+
+	cachedU, found := cache.GetTyped[UserInfo](typedKey)
+	if !found || cachedU.ID != 101 || cachedU.Name != "Bob" {
+		t.Fatalf("GetTyped failed: found=%v, u=%+v", found, cachedU)
+	}
+
+	// 7. Test ClearMemory & Clear
+	cache.ClearMemory()
+	if cache.GetMemorySize() != 0 {
+		t.Errorf("Expected memory size to be 0 after ClearMemory")
+	}
+
+	if err := cache.Clear(); err != nil {
+		t.Errorf("Clear failed: %v", err)
+	}
 }

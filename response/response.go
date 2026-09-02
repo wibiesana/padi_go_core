@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"path/filepath"
 	"runtime"
 	"runtime/debug"
 	"strings"
@@ -295,4 +296,33 @@ func InternalServerError(w http.ResponseWriter, message ...string) {
 		msg = message[0]
 	}
 	Error(w, http.StatusInternalServerError, msg)
+}
+
+// NoContent sends 204 No Content response
+func NoContent(w http.ResponseWriter) {
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// Conflict renders 409 Conflict error response
+func Conflict(w http.ResponseWriter, message string, errors ...interface{}) {
+	Error(w, http.StatusConflict, message, errors...)
+}
+
+// TooManyRequests renders 429 Rate Limit error response
+func TooManyRequests(w http.ResponseWriter, message ...string) {
+	msg := "Too many requests. Please try again later."
+	if len(message) > 0 && message[0] != "" {
+		msg = message[0]
+	}
+	Error(w, http.StatusTooManyRequests, msg)
+}
+
+// Download serves a local file as an attachment download
+func Download(w http.ResponseWriter, r *http.Request, filePath string, customName ...string) {
+	filename := filepath.Base(filePath)
+	if len(customName) > 0 && customName[0] != "" {
+		filename = customName[0]
+	}
+	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=\"%s\"", filename))
+	http.ServeFile(w, r, filePath)
 }

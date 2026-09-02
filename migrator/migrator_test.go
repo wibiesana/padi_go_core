@@ -54,4 +54,14 @@ func TestMigratorRunAndRollback(t *testing.T) {
 	if err == nil {
 		t.Fatalf("expected sample_data table to be dropped after rollback")
 	}
+
+	// 3. Test Fresh & Status
+	if err := migrator.Fresh(db); err != nil {
+		t.Fatalf("Fresh failed: %v", err)
+	}
+
+	statuses, err := migrator.Status(db)
+	if err != nil || len(statuses) != 1 || !statuses[0].Ran {
+		t.Fatalf("Status check failed: statuses=%v, err=%v", statuses, err)
+	}
 }

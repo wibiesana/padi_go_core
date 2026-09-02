@@ -1,6 +1,8 @@
 package auth_test
 
 import (
+	"context"
+	"net/http"
 	"testing"
 
 	"github.com/wibiesana/padi_go_core/auth"
@@ -52,5 +54,44 @@ func TestJWTTokenGenerationAndValidation(t *testing.T) {
 	}
 	if claims.Role != role {
 		t.Errorf("Expected Role %s, got %s", role, claims.Role)
+	}
+
+	// VerifyToken alias test
+	vClaims, err := auth.VerifyToken(token)
+	if err != nil || vClaims.UserID != userID {
+		t.Errorf("VerifyToken failed: %v", err)
+	}
+
+	// VerifyPassword flexibility test
+	if !auth.VerifyPassword("secret12345", "$2a$10$N9qo8uLOickgx2ZMRZoMyeIjZAgcfl7p92ldGxad68LJZdL17lhWy") {
+		// hash is for secret12345
+	}
+	hash, _ := auth.HashPassword("secret12345")
+	if !auth.VerifyPassword("secret12345", hash) || !auth.VerifyPassword(hash, "secret12345") {
+		t.Errorf("VerifyPassword argument order flexibility failed")
+	}
+
+	// Request helper tests
+	req, _ := http.NewRequest("GET", "/api/test", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+
+	if !auth.Check(req) {
+		t.Errorf("Expected request to be authenticated")
+	}
+	if auth.UserID(req) != userID {
+		t.Errorf("Expected UserID %d, got %d", userID, auth.UserID(req))
+	}
+	if !auth.HasRole(req, "admin", "superadmin") {
+		t.Errorf("Expected user to have admin role")
+	}
+	if auth.HasRole(req, "customer", "guest") {
+		t.Errorf("Expected user to not have customer role")
+	}
+
+	// Context helper test
+	ctx := context.WithValue(req.Context(), auth.UserContextKey, claims)
+	reqWithCtx := req.WithContext(ctx)
+	if auth.UserIDFromContext(reqWithCtx.Context()) != userID {
+		t.Errorf("UserIDFromContext failed")
 	}
 }

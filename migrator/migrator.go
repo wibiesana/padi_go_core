@@ -192,3 +192,74 @@ func ExecHelper(db *sql.DB, sqlStatements string) error {
 	}
 	return nil
 }
+
+// MigrationStatus describes the execution state of a registered migration
+type MigrationStatus struct {
+	Name     string
+	Ran      bool
+	Batch    int
+}
+
+// Status returns the current status of all registered migrations
+func Status(db *sql.DB) ([]MigrationStatus, error) {
+	if err := EnsureTable(db); err != nil {
+		return nil, err
+	}
+
+	rows, err := db.Query("SELECT migration, batch FROM migrations")
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	executedMap := make(map[string]int)
+	for rows.Next() {
+		var migName string
+		var batch int
+		if err := rows.Scan(&migName, &batch); err == nil {
+			executedMap[migName] = batch
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	var statuses []MigrationStatus
+	for _, mig := range registry {
+		batch, ran := executedMap[mig.Name]
+		statuses = append(statuses, MigrationStatus{
+			Name:  mig.Name,
+			Ran:   ran,
+			Batch: batch,
+		})
+	}
+	return statuses, nil
+}
+
+// Reset rolls back all executed migrations
+func Reset(db *sql.DB) error {
+	for {
+		var count int
+		err := db.QueryRow("SELECT COUNT(*) FROM migrations").Scan(&count)
+		if err != nil || count == 0 {
+			break
+		}
+		if err := RollbackLast(db); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// Fresh resets all migrations and re-runs them from the beginning
+func Fresh(db *sql.DB) error {
+	if err := Reset(db); err != nil {
+		return err
+	}
+	return RunPending(db)
+}
+
+// ClearRegistry clears in-memory migration registry (useful for testing)
+func ClearRegistry() {
+	registry = nil
+}

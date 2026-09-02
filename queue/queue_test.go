@@ -63,4 +63,42 @@ func TestQueuePushAndWork(t *testing.T) {
 	case <-time.After(3 * time.Second):
 		t.Fatalf("queue worker timed out processing job")
 	}
+
+	// 2. Test RegisterTyped and Size
+	type NotificationData struct {
+		Message string `json:"message"`
+	}
+	var typedMsg string
+	var wgTyped sync.WaitGroup
+	wgTyped.Add(1)
+
+	queue.RegisterTyped("SendNotification", func(data NotificationData) error {
+		typedMsg = data.Message
+		wgTyped.Done()
+		return nil
+	})
+
+	_ = queue.Push("SendNotification", NotificationData{Message: "System alert"}, "alerts")
+
+	size, err := queue.Size("alerts")
+	if err != nil || size != 1 {
+		t.Fatalf("expected queue size 1, got %d", size)
+	}
+
+	go queue.Work("alerts", 1)
+	wgTyped.Wait()
+
+	if typedMsg != "System alert" {
+		t.Fatalf("typed handler did not receive expected message: %s", typedMsg)
+	}
+
+	// 3. Test Clear
+	_ = queue.Push("SendNotification", NotificationData{Message: "Old alert"}, "alerts")
+	if err := queue.Clear("alerts"); err != nil {
+		t.Fatalf("queue.Clear failed: %v", err)
+	}
+	sizeAfterClear, _ := queue.Size("alerts")
+	if sizeAfterClear != 0 {
+		t.Fatalf("expected queue size 0 after clear, got %d", sizeAfterClear)
+	}
 }

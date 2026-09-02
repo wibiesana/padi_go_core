@@ -80,4 +80,31 @@ func TestStorageUploadAndDelete(t *testing.T) {
 	if _, err := os.Stat(fullPath); !os.IsNotExist(err) {
 		t.Fatalf("expected uploaded file to be deleted")
 	}
+
+	// 6. Test Put, Get, Copy, Move, List
+	testFile := "temp_dir/sample.txt"
+	if err := storage.Put(testFile, []byte("storage test content")); err != nil {
+		t.Fatalf("storage.Put failed: %v", err)
+	}
+	defer storage.DeleteDirectory("temp_dir")
+
+	content, err := storage.Get(testFile)
+	if err != nil || string(content) != "storage test content" {
+		t.Fatalf("storage.Get failed")
+	}
+
+	copyFile := "temp_dir/sample_copy.txt"
+	if err := storage.Copy(testFile, copyFile); err != nil {
+		t.Fatalf("storage.Copy failed: %v", err)
+	}
+
+	moveFile := "temp_dir/sample_moved.txt"
+	if err := storage.Move(copyFile, moveFile); err != nil {
+		t.Fatalf("storage.Move failed: %v", err)
+	}
+
+	files, err := storage.List("temp_dir")
+	if err != nil || len(files) != 2 {
+		t.Fatalf("storage.List failed: %v", files)
+	}
 }

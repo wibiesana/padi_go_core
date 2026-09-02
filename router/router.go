@@ -82,6 +82,22 @@ func (r *Router) Head(pattern string, handler http.HandlerFunc) {
 	r.Mux.Head(pattern, handler)
 }
 
+// Any adds a route that matches all standard HTTP methods
+func (r *Router) Any(pattern string, handler http.HandlerFunc) {
+	r.Mux.HandleFunc(pattern, handler)
+}
+
+// Static serves static files from a root filesystem directory under a URL path prefix
+func (r *Router) Static(pattern string, rootDir string) {
+	if !strings.HasSuffix(pattern, "/") {
+		pattern += "/"
+	}
+	fs := http.StripPrefix(strings.TrimSuffix(pattern, "*"), http.FileServer(http.Dir(rootDir)))
+	r.Mux.Get(pattern+"*", http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		fs.ServeHTTP(w, req)
+	}))
+}
+
 // Handle adds an http.Handler for pattern
 func (r *Router) Handle(pattern string, handler http.Handler) {
 	r.Mux.Handle(pattern, handler)
@@ -118,6 +134,25 @@ func Param(r *http.Request, key string) string {
 	return chi.URLParam(r, key)
 }
 
+// ParamInt retrieves an integer URL parameter with fallback default
+func ParamInt(r *http.Request, key string, defaultVal ...int) int {
+	val := chi.URLParam(r, key)
+	if val == "" {
+		if len(defaultVal) > 0 {
+			return defaultVal[0]
+		}
+		return 0
+	}
+	n, err := strconv.Atoi(val)
+	if err != nil {
+		if len(defaultVal) > 0 {
+			return defaultVal[0]
+		}
+		return 0
+	}
+	return n
+}
+
 // ParamUint retrieves an unsigned integer URL parameter
 func ParamUint(r *http.Request, key string) (uint, error) {
 	val := chi.URLParam(r, key)
@@ -148,4 +183,50 @@ func QueryParamInt(r *http.Request, key string, defaultVal int) int {
 		return defaultVal
 	}
 	return n
+}
+
+// QueryParamFloat retrieves float query parameter with default
+func QueryParamFloat(r *http.Request, key string, defaultVal float64) float64 {
+	val := r.URL.Query().Get(key)
+	if val == "" {
+		return defaultVal
+	}
+	f, err := strconv.ParseFloat(val, 64)
+	if err != nil {
+		return defaultVal
+	}
+	return f
+}
+
+// QueryParamBool retrieves boolean query parameter with default
+func QueryParamBool(r *http.Request, key string, defaultVal bool) bool {
+	val := r.URL.Query().Get(key)
+	if val == "" {
+		return defaultVal
+	}
+	b, err := strconv.ParseBool(val)
+	if err != nil {
+		return defaultVal
+	}
+	return b
+}
+
+// QueryParamSlice retrieves a comma-separated query parameter as a string slice
+func QueryParamSlice(r *http.Request, key string, separator ...string) []string {
+	sep := ","
+	if len(separator) > 0 && separator[0] != "" {
+		sep = separator[0]
+	}
+	val := r.URL.Query().Get(key)
+	if val == "" {
+		return []string{}
+	}
+	parts := strings.Split(val, sep)
+	var result []string
+	for _, p := range parts {
+		if trimmed := strings.TrimSpace(p); trimmed != "" {
+			result = append(result, trimmed)
+		}
+	}
+	return result
 }

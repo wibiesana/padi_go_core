@@ -112,5 +112,23 @@ func TestResponseHelpers(t *testing.T) {
 		if w6.Code != http.StatusInternalServerError {
 			t.Fatalf("expected 500, got %d", w6.Code)
 		}
+
+		w7 := httptest.NewRecorder()
+		response.NoContent(w7)
+		if w7.Code != http.StatusNoContent {
+			t.Fatalf("expected 204, got %d", w7.Code)
+		}
+
+		w8 := httptest.NewRecorder()
+		response.Conflict(w8, "Duplicate entry")
+		if w8.Code != http.StatusConflict {
+			t.Fatalf("expected 409, got %d", w8.Code)
+		}
+
+		w9 := httptest.NewRecorder()
+		response.TooManyRequests(w9)
+		if w9.Code != http.StatusTooManyRequests {
+			t.Fatalf("expected 429, got %d", w9.Code)
+		}
 	})
 }

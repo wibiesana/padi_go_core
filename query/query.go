@@ -1321,3 +1321,26 @@ func assignField(field reflect.Value, rawVal interface{}) {
 		}
 	}
 }
+
+// GetAll executes query and maps all matching rows into a typed slice
+func GetAll[T any](q *Query) ([]T, error) {
+	var records []T
+	if err := q.All(&records); err != nil {
+		return nil, err
+	}
+	return records, nil
+}
+
+// GetFirst executes query and maps the first matching row into a typed struct pointer
+func GetFirst[T any](q *Query) (*T, error) {
+	var record T
+	if err := q.First(&record); err != nil {
+		return nil, err
+	}
+	return &record, nil
+}
+
+// GetOne is an alias for GetFirst
+func GetOne[T any](q *Query) (*T, error) {
+	return GetFirst[T](q)
+}

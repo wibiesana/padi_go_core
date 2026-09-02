@@ -225,6 +225,13 @@ func Get(key string, target interface{}) bool {
 	return false
 }
 
+// GetTyped retrieves a typed value from cache without needing to pass a target pointer.
+func GetTyped[T any](key string) (T, bool) {
+	var target T
+	found := Get(key, &target)
+	return target, found
+}
+
 // Has checks if a key exists and is not expired
 func Has(key string) bool {
 	m := GetManager()
@@ -377,6 +384,25 @@ func Remember(key string, ttl time.Duration, target interface{}, fallback func()
 	return json.Unmarshal(data, target)
 }
 
+// RememberTyped gets cached value or computes and caches it in a type-safe generic manner
+func RememberTyped[T any](key string, ttl time.Duration, fallback func() (T, error)) (T, error) {
+	var target T
+	if Get(key, &target) {
+		return target, nil
+	}
+
+	val, err := fallback()
+	if err != nil {
+		return target, err
+	}
+
+	if err := Set(key, val, ttl); err != nil {
+		return target, err
+	}
+
+	return val, nil
+}
+
 // Flush clears all cache entries (L1 + L2)
 func Flush() error {
 	m := GetManager()
@@ -395,6 +421,19 @@ func Flush() error {
 	}
 
 	return nil
+}
+
+// Clear is an alias for Flush matching PHP Cache::clear()
+func Clear() error {
+	return Flush()
+}
+
+// ClearMemory clears only the L1 in-memory cache
+func ClearMemory() {
+	m := GetManager()
+	m.mu.Lock()
+	m.memoryCache = make(map[string]CacheItem)
+	m.mu.Unlock()
 }
 
 // Cleanup removes expired file cache entries. Returns count of deleted files.

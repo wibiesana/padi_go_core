@@ -41,4 +41,14 @@ func TestRealtimeSSEAndPublish(t *testing.T) {
 	if !strings.Contains(body, "event: notifications") || !strings.Contains(body, "Hello Realtime!") {
 		t.Fatalf("expected SSE stream to contain published event, got:\n%s", body)
 	}
+
+	// 2. Test Batch & Broadcast without panics
+	realtime.PublishBatch([]realtime.Event{
+		{Topic: "chat", Data: "msg1"},
+		{Topic: "chat", Data: "msg2"},
+	})
+	realtime.Broadcast("system announcement")
+
+	_ = realtime.SubscriberCount("chat")
+	_ = realtime.Topics()
 }

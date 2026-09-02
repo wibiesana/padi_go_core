@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/joho/godotenv"
 )
@@ -62,6 +63,30 @@ func Load(envPath ...string) *Config {
 	return AppConfig
 }
 
+// Current returns the loaded Config instance or initializes it if nil
+func Current() *Config {
+	if AppConfig == nil {
+		return Load()
+	}
+	return AppConfig
+}
+
+// Env is an alias for GetEnv
+func Env(key, defaultVal string) string {
+	return GetEnv(key, defaultVal)
+}
+
+// Get is an alias for GetEnv
+func Get(key, defaultVal string) string {
+	return GetEnv(key, defaultVal)
+}
+
+// SetEnv sets an environment variable
+func SetEnv(key, val string) error {
+	return os.Setenv(key, val)
+}
+
+// GetEnv retrieves a string environment variable with default fallback
 func GetEnv(key, defaultVal string) string {
 	val := os.Getenv(key)
 	if val == "" {
@@ -70,6 +95,7 @@ func GetEnv(key, defaultVal string) string {
 	return val
 }
 
+// GetEnvBool retrieves a boolean environment variable
 func GetEnvBool(key string, defaultVal bool) bool {
 	val := os.Getenv(key)
 	if val == "" {
@@ -79,6 +105,7 @@ func GetEnvBool(key string, defaultVal bool) bool {
 	return valLower == "true" || valLower == "1" || valLower == "yes"
 }
 
+// GetEnvInt retrieves an integer environment variable
 func GetEnvInt(key string, defaultVal int) int {
 	val := os.Getenv(key)
 	if val == "" {
@@ -91,6 +118,37 @@ func GetEnvInt(key string, defaultVal int) int {
 	return n
 }
 
+// GetEnvFloat retrieves a float64 environment variable
+func GetEnvFloat(key string, defaultVal float64) float64 {
+	val := os.Getenv(key)
+	if val == "" {
+		return defaultVal
+	}
+	f, err := strconv.ParseFloat(val, 64)
+	if err != nil {
+		return defaultVal
+	}
+	return f
+}
+
+// GetEnvDuration retrieves a time.Duration environment variable (e.g. "5m", "10s", "24h")
+func GetEnvDuration(key string, defaultVal time.Duration) time.Duration {
+	val := os.Getenv(key)
+	if val == "" {
+		return defaultVal
+	}
+	d, err := time.ParseDuration(val)
+	if err != nil {
+		// If it's a raw integer, assume seconds
+		if secs, err := strconv.Atoi(val); err == nil {
+			return time.Duration(secs) * time.Second
+		}
+		return defaultVal
+	}
+	return d
+}
+
+// GetEnvSlice retrieves a comma-separated slice environment variable
 func GetEnvSlice(key string, defaultVal []string) []string {
 	val := os.Getenv(key)
 	if val == "" {
@@ -110,6 +168,25 @@ func GetEnvSlice(key string, defaultVal []string) []string {
 	return result
 }
 
+// IsProduction checks if the application is running in production mode
+func IsProduction() bool {
+	cfg := Current()
+	return strings.EqualFold(cfg.AppEnv, "production") || strings.EqualFold(cfg.AppEnv, "prod")
+}
+
+// IsDevelopment checks if the application is running in development mode
+func IsDevelopment() bool {
+	cfg := Current()
+	return strings.EqualFold(cfg.AppEnv, "development") || strings.EqualFold(cfg.AppEnv, "dev") || strings.EqualFold(cfg.AppEnv, "local")
+}
+
+// IsTesting checks if the application is running in testing mode
+func IsTesting() bool {
+	cfg := Current()
+	return strings.EqualFold(cfg.AppEnv, "testing") || strings.EqualFold(cfg.AppEnv, "test")
+}
+
+// EnsureDirectory ensures that parent directory exists
 func EnsureDirectory(path string) error {
 	dir := filepath.Dir(path)
 	return os.MkdirAll(dir, 0755)

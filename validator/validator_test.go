@@ -46,4 +46,23 @@ func TestStructValidation(t *testing.T) {
 	if _, exists := errs["age"]; !exists {
 		t.Errorf("Expected 'age' validation error")
 	}
+
+	// 2. Test FormValidator
+	fv := validator.New(map[string]interface{}{
+		"username": "alex",
+		"email":    "invalid-email",
+	})
+	fv.Required("username", "password")
+	fv.Email("email")
+
+	if fv.Passes() {
+		t.Errorf("Expected FormValidator to fail")
+	}
+	vErrs := fv.Errors()
+	if _, exists := vErrs["password"]; !exists {
+		t.Errorf("Expected 'password' required error")
+	}
+	if _, exists := vErrs["email"]; !exists {
+		t.Errorf("Expected 'email' invalid format error")
+	}
 }

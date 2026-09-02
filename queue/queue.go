@@ -1,8 +1,10 @@
 package queue
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
+	"fmt"
 	"log"
 	"sync"
 	"time"
@@ -34,6 +36,17 @@ func RegisterJobHandler(name string, handler JobHandler) {
 	handlersMu.Lock()
 	defer handlersMu.Unlock()
 	jobHandlers[name] = handler
+}
+
+// RegisterTyped registers a worker handler with automatic type deserialization
+func RegisterTyped[T any](name string, handler func(data T) error) {
+	RegisterJobHandler(name, func(payload []byte) error {
+		var data T
+		if err := json.Unmarshal(payload, &data); err != nil {
+			return fmt.Errorf("failed to unmarshal job payload: %w", err)
+		}
+		return handler(data)
+	})
 }
 
 func ensureQueueTable(db *sql.DB) error {
@@ -80,6 +93,11 @@ func ensureQueueTable(db *sql.DB) error {
 
 // Push pushes a new job to the database queue
 func Push(jobName string, data interface{}, queueName ...string) error {
+	return PushLater(0, jobName, data, queueName...)
+}
+
+// PushLater pushes a job to be executed after a specified delay
+func PushLater(delay time.Duration, jobName string, data interface{}, queueName ...string) error {
 	db := database.GetDB()
 	_ = ensureQueueTable(db)
 
@@ -98,18 +116,70 @@ func Push(jobName string, data interface{}, queueName ...string) error {
 		return err
 	}
 
+	availableAt := time.Now().Add(delay).Unix()
 	driver := database.GetDriver()
 	insertSQL := "INSERT INTO jobs (queue, payload, available_at) VALUES (?, ?, ?)"
 	if driver == "postgres" {
 		insertSQL = "INSERT INTO jobs (queue, payload, available_at) VALUES ($1, $2, $3)"
 	}
 
-	_, err = db.Exec(insertSQL, qName, string(bytes), time.Now().Unix())
+	_, err = db.Exec(insertSQL, qName, string(bytes), availableAt)
+	return err
+}
+
+// Later is an alias for PushLater
+func Later(delay time.Duration, jobName string, data interface{}, queueName ...string) error {
+	return PushLater(delay, jobName, data, queueName...)
+}
+
+// Size returns the count of pending available jobs in a queue
+func Size(queueName ...string) (int64, error) {
+	db := database.GetDB()
+	_ = ensureQueueTable(db)
+
+	qName := "default"
+	if len(queueName) > 0 && queueName[0] != "" {
+		qName = queueName[0]
+	}
+
+	driver := database.GetDriver()
+	countSQL := "SELECT COUNT(*) FROM jobs WHERE queue = ? AND reserved_at IS NULL"
+	if driver == "postgres" {
+		countSQL = "SELECT COUNT(*) FROM jobs WHERE queue = $1 AND reserved_at IS NULL"
+	}
+
+	var count int64
+	err := db.QueryRow(countSQL, qName).Scan(&count)
+	return count, err
+}
+
+// Clear removes all pending jobs from a queue
+func Clear(queueName ...string) error {
+	db := database.GetDB()
+	_ = ensureQueueTable(db)
+
+	qName := "default"
+	if len(queueName) > 0 && queueName[0] != "" {
+		qName = queueName[0]
+	}
+
+	driver := database.GetDriver()
+	delSQL := "DELETE FROM jobs WHERE queue = ?"
+	if driver == "postgres" {
+		delSQL = "DELETE FROM jobs WHERE queue = $1"
+	}
+
+	_, err := db.Exec(delSQL, qName)
 	return err
 }
 
 // Work starts processing jobs in the queue
 func Work(queueName string, maxJobs int) {
+	WorkWithContext(context.Background(), queueName, maxJobs)
+}
+
+// WorkWithContext starts processing jobs in the queue with cancellation support
+func WorkWithContext(ctx context.Context, queueName string, maxJobs int) {
 	db := database.GetDB()
 	_ = ensureQueueTable(db)
 
@@ -122,6 +192,12 @@ func Work(queueName string, maxJobs int) {
 
 	processed := 0
 	for {
+		select {
+		case <-ctx.Done():
+			log.Printf("Queue worker stopped by context cancellation.")
+			return
+		default:
+		}
 		if maxJobs > 0 && processed >= maxJobs {
 			log.Printf("Worker reached max jobs (%d). Stopping.", maxJobs)
 			break

@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 )
@@ -42,13 +43,70 @@ func Publish(topic string, data interface{}) {
 	}
 }
 
-// SubscribeSSE provides an HTTP SSE endpoint handler for clients
+// PublishBatch broadcasts multiple events
+func PublishBatch(events []Event) {
+	for _, ev := range events {
+		Publish(ev.Topic, ev.Data)
+	}
+}
+
+// Broadcast sends an event data payload to all registered topics
+func Broadcast(data interface{}) {
+	globalHub.mu.RLock()
+	var topics []string
+	for t := range globalHub.subscribers {
+		topics = append(topics, t)
+	}
+	globalHub.mu.RUnlock()
+
+	for _, t := range topics {
+		Publish(t, data)
+	}
+}
+
+// SubscriberCount returns the number of active clients subscribed to a topic
+func SubscriberCount(topic string) int {
+	globalHub.mu.RLock()
+	defer globalHub.mu.RUnlock()
+	if subMap, exists := globalHub.subscribers[topic]; exists {
+		return len(subMap)
+	}
+	return 0
+}
+
+// Topics returns a list of all currently active topics with at least one subscriber
+func Topics() []string {
+	globalHub.mu.RLock()
+	defer globalHub.mu.RUnlock()
+	var list []string
+	for t := range globalHub.subscribers {
+		list = append(list, t)
+	}
+	return list
+}
+
+// SubscribeSSE provides an HTTP SSE endpoint handler for clients.
+// If topics are passed, it subscribes to them; otherwise it reads from ?topic= or ?topics= query params.
 func SubscribeSSE(topics ...string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		flusher, ok := w.(http.Flusher)
 		if !ok {
 			http.Error(w, "Streaming unsupported", http.StatusInternalServerError)
 			return
+		}
+
+		activeTopics := topics
+		if len(activeTopics) == 0 {
+			if qTopics := r.URL.Query().Get("topics"); qTopics != "" {
+				for _, t := range strings.Split(qTopics, ",") {
+					tTrimmed := strings.TrimSpace(t)
+					if tTrimmed != "" {
+						activeTopics = append(activeTopics, tTrimmed)
+					}
+				}
+			} else if qTopic := r.URL.Query().Get("topic"); qTopic != "" {
+				activeTopics = append(activeTopics, strings.TrimSpace(qTopic))
+			}
 		}
 
 		w.Header().Set("Content-Type", "text/event-stream")
@@ -60,7 +118,7 @@ func SubscribeSSE(topics ...string) http.HandlerFunc {
 
 		// Register subscriber
 		globalHub.mu.Lock()
-		for _, topic := range topics {
+		for _, topic := range activeTopics {
 			if _, exists := globalHub.subscribers[topic]; !exists {
 				globalHub.subscribers[topic] = make(map[chan Event]bool)
 			}
@@ -70,7 +128,7 @@ func SubscribeSSE(topics ...string) http.HandlerFunc {
 
 		defer func() {
 			globalHub.mu.Lock()
-			for _, topic := range topics {
+			for _, topic := range activeTopics {
 				if subMap, exists := globalHub.subscribers[topic]; exists {
 					delete(subMap, eventChan)
 					if len(subMap) == 0 {

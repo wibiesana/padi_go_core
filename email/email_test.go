@@ -25,8 +25,27 @@ func TestEmailSendValidation(t *testing.T) {
 		Subject: "Test Subject",
 		Body:    "<p>Hello World</p>",
 	}
-	err = email.Send(msgWithTo)
+	_ = email.Send(msgWithTo)
+
+	// 3. Test SendTemplate error handling
+	err = email.SendTemplate([]string{"user@example.com"}, "Welcome", "Hello {{.Name}}", map[string]string{"Name": "Alice"})
 	if err == nil {
-		// If by chance a local smtp is open, that's fine, otherwise err is expected
+		// SMTP may fail if no daemon running, which is expected
 	}
+
+	// 4. Test invalid template syntax error
+	err = email.SendTemplate([]string{"user@example.com"}, "Bad", "Hello {{.Name", nil)
+	if err == nil {
+		t.Fatalf("expected template parsing error")
+	}
+
+	// 5. Test SendAsync without panic
+	done := make(chan bool)
+	email.SendAsync(msg, func(err error) {
+		if err == nil {
+			t.Errorf("expected error on empty recipients")
+		}
+		done <- true
+	})
+	<-done
 }

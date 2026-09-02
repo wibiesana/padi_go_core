@@ -28,95 +28,103 @@ go get github.com/wibiesana/padi_go_core@latest
 
 The engine provides a cohesive suite of packages:
 
-| Package | Description |
-| :--- | :--- |
-| **`activerecord`** | Reflection-powered native ActiveRecord engine for CRUD operations (`Find`, `Save`, `Delete`, `First`). |
-| **`auth`** | JWT Token management (generation & verification) and Bcrypt password hashing. |
-| **`cache`** | Multi-tier L1 (Memory) + L2 (Redis / File) caching with atomic writes, numeric incr/decr, `Has`, `DeleteMany`, and `Remember`. |
-| **`config`** | `.env`-driven configuration loader and typed environment variable helpers. |
-| **`database`** | Multi-driver connection pooling (`sqlite` pure-Go, `mysql`, `postgres`). |
-| **`email`** | SMTP mailer with SSL/TLS support and RFC-compliant validation. |
-| **`file` / `storage`** | Secure file uploads with MIME content sniffing, path traversal defense, and `URLOrNull` helpers. |
-| **`generator`** | Signature scaffolding generator for Base Models, Custom Models, Resources, Controllers, Routes, and Postman Collections. |
-| **`logger`** | Daily rotating structured file logger (`storage/logs/app-*.log`, `error-*.log`) with 14-day retention and JSON context. |
-| **`middleware`** | HTTP middleware suite: `AuthRequired`, `CORS`, `Logger`, `RateLimiter`, and `Recoverer`. |
-| **`migrator`** | Migration registry, schema runner, and batch rollback system. |
-| **`model`** | Base model interfaces and ActiveRecord lifecycle hooks. |
-| **`query`** | Native Fluent Query Builder (`Where`, `Join`, `OrderBy`, `GroupBy`, `Paginate`, etc.). |
-| **`queue`** | Database-backed asynchronous background job queue and worker runner (`queue.Push`, `queue.Work`). |
-| **`realtime`** | Native Server-Sent Events (SSE) broadcaster and pub/sub hub. |
-| **`response`** | Standardized JSON response envelopes (`Success`, `Created`, `BadRequest`, `NotFound`, `Paginated`, etc.). |
-| **`router`** | Chi router wrapper with semantic group versioning and URL parameter extractors. |
-| **`validator`** | Struct validation and JSON request payload binding. |
-| **`wizard`** | Interactive CLI setup wizard for project configuration. |
+| Package | Description | Documentation |
+| :--- | :--- | :--- |
+| **`activerecord`** | Reflection-powered native ActiveRecord engine with generic `ModelQuery[T]`, eager loading (`.With()`), nested relations, and lifecycle hooks. | [Guide](docs/activerecord.md) |
+| **`auth`** | JWT Token management (generation & verification), Bcrypt hashing, and HTTP request user context extractors. | [Guide](docs/auth.md) |
+| **`cache`** | Multi-tier L1 (Memory) + L2 (Redis / File) caching with type-safe `GetTyped[T]` and `RememberTyped[T]`. | [Guide](docs/cache.md) |
+| **`config`** | `.env`-driven configuration loader, environment checkers (`IsProduction`), and typed getters. | [Guide](docs/config.md) |
+| **`database`** | Multi-driver connection pooling (`sqlite` pure-Go, `mysql`, `postgres`), transaction managers, and query telemetry. | [Guide](docs/database.md) |
+| **`email`** | SMTP mailer with HTML/plain-text, multipart base64 attachments, template rendering, and async dispatching. | [Guide](docs/email.md) |
+| **`file` / `storage`** | Secure file uploads with MIME content sniffing, path traversal defense, and `URLOrNull` helpers. | [Guide](docs/file_storage.md) |
+| **`generator`** | Signature scaffolding generator for Base Models, Custom Models, Resources, Controllers, Routes, and Postman Collections. | Auto-scaffolding |
+| **`logger`** | Daily rotating structured file logger (`storage/logs/app-*.log`, `error-*.log`) with 14-day retention, printf methods, and JSON context. | [Guide](docs/logger.md) |
+| **`middleware`** | HTTP middleware suite: `AuthRequired`, `RequireRole`, `SecurityHeaders`, `CORS`, `Logger`, `RateLimit`, and `Recoverer`. | [Guide](docs/middleware.md) |
+| **`migrator`** | Migration registry, schema runner, batch rollback, status inspection, and `Fresh` / `Reset` helpers. | [Guide](docs/migrator.md) |
+| **`model`** | Base model interfaces, schema definitions, and ActiveRecord lifecycle hooks. | [Guide](docs/activerecord.md) |
+| **`query`** | Native Fluent Query Builder (`Where`, `Join`, `OrderBy`, `GroupBy`, `Paginate`, etc.) with generic `GetAll[T]` and `GetFirst[T]`. | [Guide](docs/query.md) |
+| **`queue`** | Database-backed background job queue with delayed dispatch (`PushLater`), retries, and type-safe `RegisterTyped[T]` handlers. | [Guide](docs/queue.md) |
+| **`realtime`** | Native Server-Sent Events (SSE) broadcaster, topic pub/sub hub, and batch publisher. | [Guide](docs/realtime.md) |
+| **`response`** | Standardized JSON response envelopes (`Success`, `Created`, `BadRequest`, `NotFound`, `Paginated`, `Download`, etc.). | [Guide](docs/response.md) |
+| **`router`** | Chi router wrapper with semantic group versioning (`/v1`), static file server, and URL/query parameter extractors. | [Guide](docs/router.md) |
+| **`validator`** | Tag-based struct validation, generic one-line `Bind[T]`, and procedural `FormValidator` builder. | [Guide](docs/validator.md) |
+| **`wizard`** | Interactive CLI setup wizard for project configuration and `.env` generation. | CLI Wizard |
 
 ---
 
 ## 💡 Quick Examples
 
-### 1. Daily Rotating Logger
+### 1. ActiveRecord Out-of-the-Box Eager Loading & Generic Querying
+```go
+import "github.com/wibiesana/padi_go_core/activerecord"
+
+// Query with nested eager loading and column filtering
+posts, meta, err := activerecord.NewModelQuery[Post]().
+    With("author:id,name,email", "comments.author").
+    Where("status", "published").
+    OrderBy("created_at", "DESC").
+    Paginate(opts, []string{"title", "content"})
+```
+
+### 2. Type-Safe Request Binding & Validation
+```go
+type CreatePostRequest struct {
+    Title   string `json:"title" validate:"required,min=5,max=255"`
+    Content string `json:"content" validate:"required"`
+}
+
+func (c *PostController) Create(w http.ResponseWriter, r *http.Request) {
+    req, errs, err := validator.Bind[CreatePostRequest](r)
+    if err != nil {
+        response.UnprocessableEntity(w, errs)
+        return
+    }
+    
+    // req is *CreatePostRequest, fully validated
+    post := Post{Title: req.Title, Content: req.Content}
+    post.Save(r.Context())
+    response.Created(w, post)
+}
+```
+
+### 3. Background Queue with Type-Safe Handlers
+```go
+type EmailJob struct {
+    To      string `json:"to"`
+    Subject string `json:"subject"`
+    Body    string `json:"body"`
+}
+
+// Register type-safe worker handler
+queue.RegisterTyped("SendEmail", func(job EmailJob) error {
+    return email.SendHTML(job.To, job.Subject, job.Body)
+})
+
+// Dispatch immediately or with delay
+queue.Push("SendEmail", EmailJob{To: "user@example.com", Subject: "Welcome", Body: "<h1>Hi!</h1>"})
+queue.Later(10*time.Minute, "SendEmail", EmailJob{To: "user@example.com", Subject: "Follow-up", Body: "<p>Check this out</p>"})
+```
+
+### 4. Real-Time Server-Sent Events (SSE)
+```go
+// 1. Mount SSE endpoint in router
+r.Get("/events", realtime.SubscribeSSE()) // Listens to ?topic=orders or ?topics=chat,alerts
+
+// 2. Broadcast from controller
+realtime.Publish("orders", map[string]interface{}{
+    "order_id": 1029,
+    "status":   "paid",
+})
+```
+
+### 5. Daily Rotating Logger
 ```go
 import "github.com/wibiesana/padi_go_core/logger"
 
 // Log structured entries with optional JSON context
 logger.Info("User logged in", map[string]interface{}{"user_id": 42, "ip": "127.0.0.1"})
-logger.Error("Database connection timed out", map[string]interface{}{"retry_count": 3})
-```
-
-### 2. ActiveRecord with Context-Aware Audit Trail & Timestamps
-```go
-import (
-    "net/http"
-    "github.com/wibiesana/padi_go_core/activerecord"
-)
-
-func CreateArticle(w http.ResponseWriter, r *http.Request) {
-    article := Article{Title: "Padi Go Framework"}
-
-    // Automatically populates created_at, updated_at, created_by, and updated_by
-    if err := activerecord.Save(&article, r.Context()); err != nil {
-        http.Error(w, err.Error(), http.StatusInternalServerError)
-        return
-    }
-}
-```
-
-### 3. Fluent Query Builder & Caching
-```go
-import (
-    "time"
-    "github.com/wibiesana/padi_go_core/cache"
-    "github.com/wibiesana/padi_go_core/query"
-)
-
-// Cached computation with fallback callback
-var user map[string]interface{}
-err := cache.Remember("user:42", 10*time.Minute, &user, func() (interface{}, error) {
-    return query.New("users").Where("id", "=", 42).First()
-})
-```
-
-### 3. File Upload with MIME Content Sniffing
-```go
-import (
-    "net/http"
-    "github.com/wibiesana/padi_go_core/file"
-)
-
-func UploadAvatar(w http.ResponseWriter, r *http.Request) {
-    // Validates extension and inspects the first 512 bytes of binary content
-    path, err := file.Upload(r, "avatar", file.UploadOptions{
-        SubDir:      "avatars",
-        AllowedExts: []string{"jpg", "png", "webp"},
-    })
-    if err != nil {
-        http.Error(w, err.Error(), http.StatusBadRequest)
-        return
-    }
-    
-    avatarURL := file.URLOrNull(r, path)
-    _ = avatarURL
-}
+logger.Infof("Order #%d processed in %v", orderID, duration)
+logger.Error("Payment gateway timeout", map[string]interface{}{"gateway": "Midtrans"})
 ```
 
 ---
@@ -131,6 +139,13 @@ go test -v ./...
 
 ---
 
+## 📜 Changelog
+
+See [CHANGELOG.md](CHANGELOG.md) for full history and unreleased updates.
+
+---
+
 ## 📄 License
 
 MIT License © 2026 Padi Framework.
+

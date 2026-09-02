@@ -142,9 +142,29 @@ func Info(message string, context ...map[string]interface{}) {
 	GetLogger().write(LevelInfo, message, context...)
 }
 
+// Infof logs a formatted informational message
+func Infof(format string, args ...interface{}) {
+	GetLogger().write(LevelInfo, fmt.Sprintf(format, args...))
+}
+
 // Warning logs a warning message
 func Warning(message string, context ...map[string]interface{}) {
 	GetLogger().write(LevelWarning, message, context...)
+}
+
+// Warn is an alias for Warning
+func Warn(message string, context ...map[string]interface{}) {
+	Warning(message, context...)
+}
+
+// Warningf logs a formatted warning message
+func Warningf(format string, args ...interface{}) {
+	GetLogger().write(LevelWarning, fmt.Sprintf(format, args...))
+}
+
+// Warnf is an alias for Warningf
+func Warnf(format string, args ...interface{}) {
+	Warningf(format, args...)
 }
 
 // Error logs an error message
@@ -152,12 +172,57 @@ func Error(message string, context ...map[string]interface{}) {
 	GetLogger().write(LevelError, message, context...)
 }
 
+// Errorf logs a formatted error message
+func Errorf(format string, args ...interface{}) {
+	GetLogger().write(LevelError, fmt.Sprintf(format, args...))
+}
+
 // Debug logs a debug message
 func Debug(message string, context ...map[string]interface{}) {
 	GetLogger().write(LevelDebug, message, context...)
 }
 
+// Debugf logs a formatted debug message
+func Debugf(format string, args ...interface{}) {
+	GetLogger().write(LevelDebug, fmt.Sprintf(format, args...))
+}
+
 // Critical logs a critical message
 func Critical(message string, context ...map[string]interface{}) {
 	GetLogger().write(LevelCritical, message, context...)
+}
+
+// Criticalf logs a formatted critical message
+func Criticalf(format string, args ...interface{}) {
+	GetLogger().write(LevelCritical, fmt.Sprintf(format, args...))
+}
+
+// RotateLogs triggers log rotation, removing log files older than retentionDays (default: 14)
+func RotateLogs(retentionDays ...int) {
+	days := 14
+	if len(retentionDays) > 0 && retentionDays[0] > 0 {
+		days = retentionDays[0]
+	}
+	l := GetLogger()
+	cutoff := time.Now().AddDate(0, 0, -days)
+
+	entries, err := os.ReadDir(l.logDir)
+	if err != nil {
+		return
+	}
+
+	for _, entry := range entries {
+		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".log") {
+			continue
+		}
+
+		info, err := entry.Info()
+		if err != nil {
+			continue
+		}
+
+		if info.ModTime().Before(cutoff) {
+			_ = os.Remove(filepath.Join(l.logDir, entry.Name()))
+		}
+	}
 }

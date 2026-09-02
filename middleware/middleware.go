@@ -148,6 +148,48 @@ func AuthRequired(next http.Handler) http.Handler {
 	})
 }
 
+// Auth is an alias for AuthRequired
+var Auth = AuthRequired
+
+// RequireRole ensures authenticated user has one of the specified roles
+func RequireRole(roles ...string) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			claims, ok := r.Context().Value(UserContextKey).(*auth.JWTClaims)
+			if !ok || claims == nil {
+				response.Unauthorized(w, "Authentication required")
+				return
+			}
+
+			hasRole := false
+			for _, role := range roles {
+				if strings.EqualFold(claims.Role, role) {
+					hasRole = true
+					break
+				}
+			}
+
+			if !hasRole {
+				response.Forbidden(w, "You do not have permission to access this resource")
+				return
+			}
+
+			next.ServeHTTP(w, r)
+		})
+	}
+}
+
+// SecurityHeaders applies standard security HTTP response headers
+func SecurityHeaders(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("X-Content-Type-Options", "nosniff")
+		w.Header().Set("X-Frame-Options", "DENY")
+		w.Header().Set("X-XSS-Protection", "1; mode=block")
+		w.Header().Set("Referrer-Policy", "strict-origin-when-cross-origin")
+		next.ServeHTTP(w, r)
+	})
+}
+
 // Simple in-memory rate limiter
 type rateLimiter struct {
 	mu      sync.Mutex

@@ -3,6 +3,7 @@ package config_test
 import (
 	"os"
 	"testing"
+	"time"
 
 	"github.com/wibiesana/padi_go_core/config"
 )
@@ -48,5 +49,33 @@ func TestConfigLoadAndHelpers(t *testing.T) {
 	intVal := config.GetEnvInt("NON_EXISTING_INT", 100)
 	if intVal != 100 {
 		t.Fatalf("expected fallback 100")
+	}
+
+	// Test float and duration
+	os.Setenv("FLOAT_VAL", "3.14")
+	if config.GetEnvFloat("FLOAT_VAL", 1.0) != 3.14 {
+		t.Fatalf("expected float 3.14")
+	}
+
+	os.Setenv("DUR_VAL", "5m")
+	if config.GetEnvDuration("DUR_VAL", 0) != 5*time.Minute {
+		t.Fatalf("expected duration 5m")
+	}
+
+	// Test aliases and env modes
+	if config.Env("APP_NAME", "") != "Padi Test Suite" {
+		t.Fatalf("Env alias failed")
+	}
+	if config.Get("APP_NAME", "") != "Padi Test Suite" {
+		t.Fatalf("Get alias failed")
+	}
+
+	_ = config.SetEnv("APP_ENV", "development")
+	config.Load()
+	if !config.IsDevelopment() {
+		t.Fatalf("expected IsDevelopment to be true")
+	}
+	if config.IsProduction() {
+		t.Fatalf("expected IsProduction to be false")
 	}
 }

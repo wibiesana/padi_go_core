@@ -48,4 +48,34 @@ func TestRouterVersioningAndEndpoints(t *testing.T) {
 	if w2.Code != http.StatusOK {
 		t.Errorf("Expected status 200 on /v1/items/99, got %d", w2.Code)
 	}
+
+	// 3. Test Any
+	r.Any("/ping-any", func(w http.ResponseWriter, req *http.Request) {
+		response.Success(w, "pong")
+	})
+
+	for _, method := range []string{http.MethodGet, http.MethodPost, http.MethodPut, http.MethodDelete} {
+		req := httptest.NewRequest(method, "/ping-any", nil)
+		rec := httptest.NewRecorder()
+		r.ServeHTTP(rec, req)
+		if rec.Code != http.StatusOK {
+			t.Errorf("Expected Any route to handle %s with 200, got %d", method, rec.Code)
+		}
+	}
+
+	// 4. Test Query Helpers
+	queryReq := httptest.NewRequest(http.MethodGet, "/test?page=2&ratio=1.5&active=true&tags=go,framework,rest", nil)
+	if p := router.QueryParamInt(queryReq, "page", 1); p != 2 {
+		t.Errorf("QueryParamInt failed, got %d", p)
+	}
+	if f := router.QueryParamFloat(queryReq, "ratio", 1.0); f != 1.5 {
+		t.Errorf("QueryParamFloat failed, got %f", f)
+	}
+	if b := router.QueryParamBool(queryReq, "active", false); !b {
+		t.Errorf("QueryParamBool failed")
+	}
+	tags := router.QueryParamSlice(queryReq, "tags")
+	if len(tags) != 3 || tags[0] != "go" || tags[1] != "framework" {
+		t.Errorf("QueryParamSlice failed: %v", tags)
+	}
 }

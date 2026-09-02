@@ -3,6 +3,9 @@ package file
 import (
 	"mime/multipart"
 	"net/http"
+	"os"
+	"path/filepath"
+	"strings"
 
 	"github.com/wibiesana/padi_go_core/storage"
 )
@@ -57,4 +60,47 @@ func MimeType(relativePath string) (string, error) {
 // Delete removes file from storage
 func Delete(relativePath string) error {
 	return storage.Delete(relativePath)
+}
+
+// Path returns the local file system path for a relative storage path
+func Path(relativePath string) string {
+	return filepath.Join("storage", filepath.Clean(relativePath))
+}
+
+// Put writes binary content to a storage path
+func Put(relativePath string, content []byte) error {
+	fullPath := Path(relativePath)
+	if err := os.MkdirAll(filepath.Dir(fullPath), 0755); err != nil {
+		return err
+	}
+	return os.WriteFile(fullPath, content, 0644)
+}
+
+// PutString writes a text string to a storage path
+func PutString(relativePath string, content string) error {
+	return Put(relativePath, []byte(content))
+}
+
+// Get reads binary content from a storage path
+func Get(relativePath string) ([]byte, error) {
+	fullPath := Path(relativePath)
+	return os.ReadFile(fullPath)
+}
+
+// GetString reads text content from a storage path
+func GetString(relativePath string) (string, error) {
+	bytes, err := Get(relativePath)
+	if err != nil {
+		return "", err
+	}
+	return string(bytes), nil
+}
+
+// SanitizeFileName strips path traversal characters and invalid symbols
+func SanitizeFileName(name string) string {
+	base := filepath.Base(name)
+	base = strings.ReplaceAll(base, "..", "")
+	base = strings.ReplaceAll(base, "/", "")
+	base = strings.ReplaceAll(base, "\\", "")
+	return strings.TrimSpace(base)
 }

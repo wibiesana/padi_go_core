@@ -66,4 +66,15 @@ func TestLoggerWritingAndFiles(t *testing.T) {
 	if !strings.Contains(string(errContent), `"error_code":500`) {
 		t.Errorf("Error log missing structured context: %s", string(errContent))
 	}
+
+	// 4. Test formatted loggers and aliases
+	logger.Infof("Formatted info: %d users", 100)
+	logger.Warn("Warning alias test")
+	logger.Warnf("Formatted warning: %s", "high memory")
+	logger.Errorf("Formatted error: %v", "timeout")
+	logger.Debugf("Formatted debug: %t", true)
+	logger.Criticalf("Formatted critical: %d", 999)
+
+	// 5. Test RotateLogs
+	logger.RotateLogs(14)
 }

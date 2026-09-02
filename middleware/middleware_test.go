@@ -160,4 +160,45 @@ func TestMiddlewareStack(t *testing.T) {
 			t.Fatalf("expected 429 on 3rd request, got %d", w3.Code)
 		}
 	})
+
+	// 6. Test RequireRole
+	t.Run("RequireRole", func(t *testing.T) {
+		roleMW := middleware.RequireRole("admin")
+		handler := middleware.Auth(roleMW(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusOK)
+		})))
+
+		// Token with user role -> 403 Forbidden
+		userToken, _ := auth.GenerateToken(1, "user@example.com", "user")
+		reqUser := httptest.NewRequest(http.MethodGet, "/admin-only", nil)
+		reqUser.Header.Set("Authorization", "Bearer "+userToken)
+		wUser := httptest.NewRecorder()
+		handler.ServeHTTP(wUser, reqUser)
+		if wUser.Code != http.StatusForbidden {
+			t.Fatalf("expected 403 for user role, got %d", wUser.Code)
+		}
+
+		// Token with admin role -> 200 OK
+		adminToken, _ := auth.GenerateToken(2, "admin@example.com", "admin")
+		reqAdmin := httptest.NewRequest(http.MethodGet, "/admin-only", nil)
+		reqAdmin.Header.Set("Authorization", "Bearer "+adminToken)
+		wAdmin := httptest.NewRecorder()
+		handler.ServeHTTP(wAdmin, reqAdmin)
+		if wAdmin.Code != http.StatusOK {
+			t.Fatalf("expected 200 for admin role, got %d", wAdmin.Code)
+		}
+	})
+
+	// 7. Test SecurityHeaders
+	t.Run("SecurityHeaders", func(t *testing.T) {
+		handler := middleware.SecurityHeaders(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusOK)
+		}))
+		req := httptest.NewRequest(http.MethodGet, "/", nil)
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, req)
+		if rec.Header().Get("X-Frame-Options") != "DENY" {
+			t.Fatalf("expected X-Frame-Options DENY")
+		}
+	})
 }

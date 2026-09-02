@@ -92,7 +92,7 @@ func GetWith(m Model) []string {
 	return activerecord.GetWith(m)
 }
 
-func With[T Model](relations ...string) *query.Query {
+func With[T Model](relations ...string) *activerecord.ModelQuery[T] {
 	return activerecord.With[T](relations...)
 }
 
@@ -100,11 +100,11 @@ func ClearWith() {
 	activerecord.ClearWith()
 }
 
-func FindBuilder[T Model]() *query.Query {
+func FindBuilder[T Model]() *activerecord.ModelQuery[T] {
 	return activerecord.FindBuilder[T]()
 }
 
-func FindQuery[T Model]() *query.Query {
+func FindQuery[T Model]() *activerecord.ModelQuery[T] {
 	return activerecord.FindQuery[T]()
 }
 
