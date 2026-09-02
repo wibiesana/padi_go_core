@@ -866,9 +866,11 @@ func (c *{{ModelName}}Controller) Index(w http.ResponseWriter, r *http.Request) 
 	response.Paginated(w, res.ToMapCollection(records), meta, "{{ModelName}} list retrieved successfully")
 }
 
-// All retrieves all records with optional dynamic eager loading (?with=...)
+// All retrieves all records with search, sorting, and optional dynamic eager loading (?with=...)
 func (c *{{ModelName}}Controller) All(w http.ResponseWriter, r *http.Request) {
-	records, err := activerecord.AllWithContext[models.{{ModelName}}](r.Context())
+	opts := query.ParseOptions(r)
+	searchColumns := []string{{{SearchColumns}}}
+	records, err := activerecord.AllWithOptsWithContext[models.{{ModelName}}](r.Context(), opts, searchColumns...)
 	if err != nil {
 		response.InternalServerError(w, "Failed to retrieve all {{ModelName}}")
 		return
@@ -1108,9 +1110,14 @@ func (g *Generator) generateAPICollection(tableName, modelName string, columns [
 					"method": "GET",
 					"header": []interface{}{},
 					"url": map[string]interface{}{
-						"raw":  fmt.Sprintf("{{base_url}}/%s/all", routePrefix),
+						"raw":  fmt.Sprintf("{{base_url}}/%s/all?search=&sort=id&order=desc", routePrefix),
 						"host": []string{"{{base_url}}"},
 						"path": []string{routePrefix, "all"},
+						"query": []map[string]string{
+							{"key": "search", "value": ""},
+							{"key": "sort", "value": "id"},
+							{"key": "order", "value": "desc"},
+						},
 					},
 				},
 				"response": []interface{}{},

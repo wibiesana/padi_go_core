@@ -784,6 +784,23 @@ func AllWithContext[T Model](ctx context.Context, columns ...string) ([]T, error
 	return NewModelQuery[T]().WithContext(ctx).Get(columns...)
 }
 
+// AllWithOpts retrieves all records applying search and sorting options
+func AllWithOpts[T Model](opts query.Options, searchColumns ...string) ([]T, error) {
+	return AllWithOptsWithContext[T](context.TODO(), opts, searchColumns...)
+}
+
+// AllWithOptsWithContext retrieves all records applying search and sorting options with context
+func AllWithOptsWithContext[T Model](ctx context.Context, opts query.Options, searchColumns ...string) ([]T, error) {
+	q := NewModelQuery[T]().WithContext(ctx)
+	if opts.Search != "" && len(searchColumns) > 0 {
+		q.Search(opts.Search, searchColumns...)
+	}
+	if opts.Sort != "" {
+		q.OrderBy(opts.Sort, opts.Order)
+	}
+	return q.Get()
+}
+
 // Get retrieves all records with eager-loading if configured
 func Get[T Model](columns ...string) ([]T, error) {
 	return All[T](columns...)

@@ -168,6 +168,14 @@ func AllWithContext[T Model](ctx context.Context, columns ...string) ([]T, error
 	return activerecord.AllWithContext[T](ctx, columns...)
 }
 
+func AllWithOpts[T Model](opts query.Options, searchColumns ...string) ([]T, error) {
+	return activerecord.AllWithOpts[T](opts, searchColumns...)
+}
+
+func AllWithOptsWithContext[T Model](ctx context.Context, opts query.Options, searchColumns ...string) ([]T, error) {
+	return activerecord.AllWithOptsWithContext[T](ctx, opts, searchColumns...)
+}
+
 func Get[T Model](columns ...string) ([]T, error) {
 	return activerecord.Get[T](columns...)
 }
