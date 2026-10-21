@@ -19,7 +19,7 @@ import (
 )
 
 
-const Version = "2.1.12"
+const Version = "1.0.0"
 
 // pgPlaceholderRe matches a single PostgreSQL positional placeholder ($1, $2, ...)
 // Compiled once at package init for use in RawSQL interpolation.

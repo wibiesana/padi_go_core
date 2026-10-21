@@ -19,7 +19,7 @@ func TestLoggerWritingAndFiles(t *testing.T) {
 	errorLogFile := filepath.Join(logDir, "error-"+dateStr+".log")
 
 	// 1. Test Info Log
-	testInfoMsg := "Test Info message for v0.0.2 testing"
+	testInfoMsg := "Test Info message for v1.0.0 testing"
 	logger.Info(testInfoMsg, map[string]interface{}{"user_id": 42, "role": "admin"})
 
 	// Check app log exists and has message
