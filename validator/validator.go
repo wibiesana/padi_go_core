@@ -1,6 +1,7 @@
 package validator
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -81,12 +82,16 @@ func ValidateStruct(s interface{}) (ValidationErrorDetails, bool) {
 
 // BindJSON decodes request body and validates the target struct
 func BindJSON(r *http.Request, target interface{}) (ValidationErrorDetails, error) {
+	if r == nil || r.Body == nil {
+		return ValidationErrorDetails{"body": "request body cannot be empty"}, io.EOF
+	}
+
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
 		return ValidationErrorDetails{"body": "failed to read request body"}, err
 	}
 
-	if len(body) == 0 {
+	if len(bytes.TrimSpace(body)) == 0 {
 		return ValidationErrorDetails{"body": "request body cannot be empty"}, io.EOF
 	}
 

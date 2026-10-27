@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -114,7 +115,7 @@ func (m *CacheManager) fileWrite(key string, item CacheItem) error {
 	}
 
 	// Write to tmp file first, then atomically rename
-	tmpPath := filePath + ".tmp"
+	tmpPath := fmt.Sprintf("%s.tmp.%d", filePath, time.Now().UnixNano())
 	if err := os.WriteFile(tmpPath, data, 0644); err != nil {
 		return err
 	}
@@ -125,7 +126,10 @@ func (m *CacheManager) fileWrite(key string, item CacheItem) error {
 func (m *CacheManager) fileRead(key string) (CacheItem, bool) {
 	filePath := m.hashKey(key)
 	data, err := os.ReadFile(filePath)
-	if err != nil {
+	if err != nil || len(data) == 0 {
+		if err == nil && len(data) == 0 {
+			_ = os.Remove(filePath)
+		}
 		return CacheItem{}, false
 	}
 
@@ -201,7 +205,7 @@ func Get(key string, target interface{}) bool {
 	// L2 Redis
 	if m.driver == "redis" && m.redisClient != nil {
 		val, err := m.redisClient.Get(context.Background(), key).Result()
-		if err == nil {
+		if err == nil && val != "" {
 			if err := json.Unmarshal([]byte(val), target); err == nil {
 				return true
 			}
@@ -332,7 +336,13 @@ func Increment(key string, step ...int64) (int64, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	item := m.memoryCache[key]
+	item, exists := m.memoryCache[key]
+	if (!exists || item.Value == nil) && m.driver == "file" {
+		if fileItem, found := m.fileRead(key); found {
+			item = fileItem
+		}
+	}
+
 	current := int64(0)
 	if item.Value != nil {
 		switch v := item.Value.(type) {
@@ -342,6 +352,14 @@ func Increment(key string, step ...int64) (int64, error) {
 			current = v
 		case int:
 			current = int64(v)
+		case string:
+			if n, err := strconv.ParseInt(v, 10, 64); err == nil {
+				current = n
+			}
+		case json.Number:
+			if n, err := v.Int64(); err == nil {
+				current = n
+			}
 		}
 	}
 
